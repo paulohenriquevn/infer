@@ -1,0 +1,228 @@
+---
+name: inference-benchmarking
+description: Use when measuring, comparing or qualifying a GLM-5.3-Flash serving configuration (engine, DCP profile, KV tier, checkpoint, new host or AWS g7e instance), when running comparativo.sh or roteiro.sh, when judging results with resumir.py, or when writing up a benchmark number that someone will use for a decision.
+---
+
+# Benchmarking GLM-5.3-Flash serving
+
+We measure one thing: how many coding-agent sessions a 4-GPU replica serves inside the SLO, per US$/h, after it passes a quality gate. Every rule below exists because a number was misread, did not reproduce, or came from a bad host.
+
+Harness paths below are written `f3/...`. They currently live in `/home/paulo/Projetos/infer`, not in this repository. `docs/` means `docs/` of this repository; `§N` points to `ARQUITETURA.md` in `/home/paulo/Projetos/infer` (Portuguese, later sections replace earlier ones).
+
+Evidence labels: Observed (we measured it; "(mini)" or "(real)" says on which model), Reported (named source says it), Inferred (derived; the link is given), Hypothesis (to validate), Unknown. Every number in this skill is on the **real model** (GLM-5.3-Flash on 4x RTX PRO 6000 Server Edition) unless it says mini.
+
+## When to use
+
+- Comparing engines, checkpoints, DCP1 against DCP4, or LMCache against HBM only.
+- Qualifying a new host, including the first `g7e.24xlarge` (phase 1 of `docs/06-aws-implementation-plan.md`).
+- Running `f3/sglang/comparativo.sh` or `f3/sglang/vast/roteiro.sh`, or reading their output with `f3/sglang/resumir.py`.
+- Deciding whether a result is good enough to change the engine, the profile or the fleet size.
+- Writing a result into `docs/` or a report.
+
+## Decisions and why
+
+### 1. The SLO, per agent level
+
+A level (N concurrent agents) passes when all three hold (Observed in `resumir.py`, `Slo` dataclass and `avaliar_agentes`; targets from §20, where they are Hypothesis):
+
+| Criterion | Threshold | What it is computed on |
+|---|---|---|
+| Turn errors | zero | `metrics.turn_errors` of the agents scenario |
+| TTFT p95 | at most 5 s | cached turns (turn >= 1) in steady state |
+| Per-stream decode speed p50 | at least 30 tok/s | `completion_tokens / (seconds - ttft_s)` on the same turns |
+
+Why these: 5 s TTFT for a cached turn and 30 tok/s per stream are the MVP proposals of §20 (30 tok/s is the llm-d floor for agentic GLM, Reported there). They become requirements only after measurement. §20 scopes the 5 s target to cached turns with up to 8K new tokens; `resumir.py` applies it to every steady-state cached turn (`docs/README.md`, contradictions table). Use the code's definition when comparing runs.
+
+### 2. The metric: sessions inside the SLO per US$/h
+
+`resumir.py` takes the largest N where that level and every smaller level pass, then divides by `--preco` (US$/h of the replica on the machine where it ran) (Observed in `sessoes_no_slo` and `resumir_motor`). A level that passes after a smaller one failed is treated as noise and does not count.
+
+Why per US$/h and not tokens per second: the decision of 2026-11-11 (§26.4) is efficiency on the RTX PRO 6000, not parity with B200. Faster per-stream decode still matters because slower requests lengthen each looping session and raise the replica count (§24.2).
+
+Measured (Observed (real), Vast host 157204 at US$ 5.61/h, §29.1, §29.6): vLLM DCP1 24 agents (4.28 sessions per US$/h, one run), vLLM DCP4 16 then failed 16 on repeat (2.85 for run 1; level 8 passed in run 1 and was not repeated, so no DCP4 capacity is confirmed by two runs), SGLang FP8 8 (1.43), SGLang NVFP4 16 (2.85, failed quality).
+
+Not comparable: the 12.3 sessions per US$/h baseline of §12.4 and §26.4 counts 256K sessions that fit in HBM, with no SLO (`docs/01`). Levels tested were 8, 16, 24, 32, so the count is a lower bound (§29.2).
+
+### 3. How `resumir.py` decides which turns count
+
+Observed in `avaliar_agentes`:
+
+- **Steady state.** Only turns sent after the last agent finished its turn 0 count. If any agent never finished turn 0, the level has no steady-state turns. Why: all agents start with 40K to 100K tokens of context and their cold prefills queue together (about 20 to 26 s each; 416 s at 16 agents). In the first attempt, with 7-minute levels, no turn was outside that queue, and 8 agents "failed" with a TTFT p95 of 33 s, an artefact of the scenario (§29.3).
+- **Minimum 20 steady-state turns per level** (`--minimo-turnos`, default 20 on the command line). Below that the level prints `amostra curta` and does not pass. Note: the `Slo` dataclass default is 1; the 20 comes from the CLI only.
+- **Cut turns are excluded.** Turns marked `stopped` or `aborted` (cut by the end of the level) have no usage and are dropped.
+- **`cached_tokens` must be reported.** If no steady-state turn in a level reports it, the script raises `CacheReportAusente`: start vLLM with `--enable-prompt-tokens-details` or SGLang with `--enable-cache-report`. When only some turns omit it, they count as 0 (SGLang omits the field when nothing came from cache; vLLM reports 0) (§29.4).
+- It also prints recomputed tokens per turn (prompt minus cached, p50 and p90) and the cache share. Each cached turn recomputes 3,200 to 3,800 tokens at p50 and 5,300 to 5,900 at p90 even with about 97% from cache, the tail the hybrid KDA cache does not reuse. On vLLM that tail moves TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32 (Observed (real), §29.2).
+
+### 4. The quality gate comes first
+
+An arm counts only if it passes, and the gate runs before any speed measurement so a broken server is not paid for (§27.3, §28.3).
+
+- needle-checksum runs 500 times at concurrency 8 plus 120 at concurrency 16. 8K-token prompt, temperature 0; the model must find three numbers and sum them. Wrong runs answer 3330 instead of 3332, which the `llm-inference-bench` README calls "the model's known last-digit slip" and uses as an alarm for numerical changes such as MoE activation precision (Reported, §29.4).
+- The C16 run exists to catch the EAGLE NaN of SGLang #49881, which appears when the batch fills the largest decode CUDA graph (comment in `comparativo.sh`, §27.3).
+- The verdict is a one-sided Fisher exact test of each needle file against the reference, default `--needle-ref 3/500` (vLLM DCP4). An arm fails only if it errs more than the reference with p < 0.05 (`ALFA_NEEDLE = 0.05`, `fisher_unilateral`, `passa_needle`). Erring less never fails, on purpose (§29.5). `resumir.py` applies it to `needle.json` and every `needle-c*.json`.
+- gsm8k runs 96 problems at concurrency 8. `resumir.py` prints the score but does not gate on it. The rule kept from §27.4 is "no more than 2 points below R1 vLLM"; `docs/06` phase 1 states it as at least 94/96. Check it by hand.
+
+Why not 120/120 (the §27.4 gate, replaced on 2026-11-12 by §29.5): the reference itself erred 3 times in 500 (0.6%), so 120/120 fails good configurations by chance and cannot rank two good ones. Telling 0% from 0.8% takes about a thousand runs per arm (§29.4, §29.5).
+
+What the gate caught (Observed (real), §29.5, §29.10; p-values were computed two-sided before the one-sided rule, conclusions unchanged):
+
+| Configuration | Errors at C8 | Errors at C16 | p vs reference |
+|---|---|---|---|
+| vLLM DCP4 (reference) | 3 / 500 | 0 / 120 | |
+| vLLM DCP1, two runs | 3 / 620 | 1 / 240 | passes |
+| SGLang FP8 | 4 / 240 | 0 / 240 | 0.72 (two-sided, on 4/480 pooled) |
+| SGLang NVFP4 `1d00738`, MoE W4A4 | 60 / 500 | 19 / 120 | 2e-15 |
+| Same, MoE in Marlin (W4A16) | 32 / 500 | 5 / 120 | 3e-7 |
+| Same, Marlin, no speculation, SSM state FP32 | 22 / 500 | 10 / 120 | 1e-4 |
+
+### 5. Two runs, and 20% to switch engines
+
+- **Two-run rule** (§27.4): a capacity number counts only if it holds in two runs. Why: vLLM DCP4 passed 16 agents with 0.23 s of TTFT margin (4.77 s), then failed the repeat at 5.20 s. §29.6 calls 8 its guaranteed capacity, but level 8 ran only in run 1 (`vast-vllm-r1-rep2/` has no `agentes-8.json`), so that figure is also a single run. DCP1 passed 24 agents once with 0.07 s margin (4.93 s); the second speed run landed on a bad host and is invalid (§29.10), so 24 is unconfirmed.
+- **Choosing a profile** (`docs/06` phase 2): the profile whose lower of two runs has more sessions inside the SLO wins.
+- **Engine switch** (§27.4, applied in §29.7): a challenger must pass the gate and deliver at least 20% more sessions inside the SLO per US$/h than the best vLLM arm, in two runs. Below that, the switch does not pay for the risk of depending on a community package. Reopen SGLang only when all of these exist and we measure the 20%: DCP for DSA on SM120 (PR #39215), loading the QAD checkpoint, and Unified Memory accepting the `dsa` backend (`docs/03` §4).
+- Same seed per level: `comparativo.sh` passes `--sched-seed <N>` for level N, so two runs of a level replay the same workload. The two-run rule therefore checks run and host noise, not workload variance (Inferred from the code).
+
+### 6. Qualify the host before measuring anything
+
+- The same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host: Vast host 48294 gave 108 / 298 / 350 / 296 tok/s at C1 / C8 / C16 / C32 against 154 / 696 / 1,072 / 1,578 on host 157204, with the same image, checkpoint and harness. Startup took 1,084 s against 260 s; at 16 agents only 2 or 3 requests ran with 21 queued and 5% of KV used; GPUs drew about 116 W (Observed (real), §29.10). Cause Unknown. Host 48294 ran driver 580.95.05, host 157204 ran 615.71.09, and Nebius R1 ran 580.173 at 1,425 tok/s at C32, so the driver alone does not explain it (Inferred). Hypothesis: something outside the GPUs (another tenant, CPU or memory).
+- **Rule** (§29.10, `docs/03` §6): start the server, run decode at C32 for 30 s, discard the host below 1,400 tok/s. The threshold comes from two hosts; treat it as a starting rule. It applies to DCP1: DCP4 gave 1,279 tok/s at C32 on the good host (`docs/06` phase 1).
+- **Record** for every host: `nvidia-smi` (driver, power limit, PCIe link gen and width), `nvidia-smi topo -m`, `nvidia-smi topo -p2p r`, `RegistryDwords` from `/proc/driver/nvidia/params`, CPU, RAM, disk, and the 4-GPU all-reduce microbenchmark (`preparar.sh` and step 1 of `comparativo.sh` write these to `host-<motor>/host.txt`, `p2pmark-4gpu.txt` and `<OUT>/host.txt`). `docs/06` adds: the server log must contain `Using B12X PCIe all-reduce`.
+- Why topology and P2P: on host 157204, P2P was enabled without a driver override and small all-reduce took 9.1 to 9.5 us against 32.1 to 57.4 us on Nebius R1, where the override was not in effect; C1 decode was 22% higher there (Observed; the causal link is Inferred, §28.2, §29.2). The image expects driver 615.65.02 or newer (§25.1).
+- Vast offer criteria used so far: Server Edition, disk of at least 800 GB, RAM of at least 400 GB, reliability above 0.95 (§28.3); any machine with 4 RTX PRO 6000 up to US$ 7/h and reliability of at least 0.95, identified in the results (§29.9).
+
+## How to
+
+### Run one arm on a machine you control (Docker host or inside the image)
+
+```bash
+cd f3/sglang
+# Docker on the host (R1 profile, DCP4):
+MOTOR=vllm IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
+  SERVIDOR=../p0/servidor-base.sh bash comparativo.sh
+# Docker, DCP1:            SERVIDOR=servidor-vllm-dcp1.sh
+# Inside the image (EXECUCAO=direto): SERVIDOR=servidor-vllm-direto.sh or servidor-vllm-dcp1-direto.sh
+python3 resumir.py --preco <US$/h> --needle-ref 3/500 resultados/<dir> [more dirs] [--json out.json]
+```
+
+`comparativo.sh` steps (Observed in code): host record, server start with failure detection (log patterns `Traceback`, `CUDA out of memory`, `Engine core initialization failed` and others; `TIMEOUT_PRONTO` default 3600 s), gate (needle C8 with `NEEDLE_RUNS`, needle C16 with 120, gsm8k 96), decode C1/8/16/32 for 30 s each with `--max-tokens 8192`, prefill 8K/32K/128K/256K, then the agent levels. Output directory `OUT` (default `resultados/<date>-<motor>`): `host.txt`, `servidor.sh`, `servidor.log`, `tempo-pronto.txt`, `needle.json`, `needle-c16.json`, `gsm8k.json`, `decode.json`, `prefill.json`, `agentes-<N>.json`, `avisos.txt`.
+
+Environment variables (Observed in `comparativo.sh`):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `MOTOR`, `IMAGE`, `SERVIDOR` | required | engine (`vllm` or `sglang`), image, server launch script |
+| `EXECUCAO` | `docker` | `docker` or `direto` (already inside the image, as on Vast) |
+| `GPUS`, `PORT`, `NAME`, `BENCH`, `PY`, `OUT` | `0,1,2,3`, `8000`, ... | placement, port, bench path, Python, output dir |
+| `NEEDLE_RUNS` | 500 | needle runs at C8 (120 before 2026-11-12) |
+| `PARAR_NO_PORTAO` | 1 | stop after the gate if the one-sided Fisher test fails against `NEEDLE_REF` (default `3/500`) |
+| `SO_PORTAO` | 0 | 1 = stop after the gate |
+| `SO_AGENTES` | 0 | 1 = skip gate, decode and prefill; run only the agent levels |
+| `AGENTES` | `8:600 16:900 32:1500` | levels as `agents:seconds`; `AGENTES=""` runs none |
+| `AGENTE_INICIO` | `40k-100k` | start context per agent |
+| `AGENTE_FERRAMENTA` | `1k-6k` | tool tokens added per turn |
+| `AGENTE_RESPOSTA` | `300-4000` | `max_tokens` per turn |
+| `AGENTE_PENSA` | `0-3` | think seconds between turns |
+
+The agents scenario (Observed in `sched_run_agents` of `f3/llm-inference-bench/llm_decode_bench.py`, options `--scheduler agents --sched-agents --sched-agents-duration --sched-agent-start --sched-agent-tool --sched-agent-response --sched-agent-think --sched-seed`): agents start 2 s apart; each appends its real output token IDs plus tool tokens to its history (exact history needs `/tokenize`, and our patch `bench-exact-history-sglang.patch` makes it exact on SGLang too; `comparativo.sh` refuses to run without it); a turn that errors waits 5 s; when the context would exceed the cap the agent starts a new conversation (`resets`). It has no sub-agent fan-out and no human pauses, so it is close to one continuous stream per agent (`docs/01`). The server profile uses `--max-num-seqs 32`, so levels above 32 only measure queueing (comment in `comparativo.sh`).
+
+### Run arms on Vast.ai with `roteiro.sh`
+
+Runs on your machine; one instance per engine; state in `f3/sglang/vast/estado/`; SSH key `CHAVE` (default `~/.ssh/id_ed25519_vast_infer`). Costs money: get Paulo's approval before `criar`.
+
+```bash
+cd f3/sglang/vast
+bash roteiro.sh criar vllm <offer_id>        # or: criar sglang mesma-maquina (same machine_id)
+bash roteiro.sh esperar vllm && bash roteiro.sh enviar vllm && bash roteiro.sh preparar vllm
+AGENTES="16:900 24:900" bash roteiro.sh rodar vllm dcp1-rep
+RODADA=2 SO_AGENTES=1 AGENTES="16:900 24:900" bash roteiro.sh rodar vllm dcp1-rep   # second run, own directory
+bash roteiro.sh estado vllm                  # tails of remote logs, GPU use
+bash roteiro.sh trazer vllm                  # rsync to f3/resultados/vast-<date>/vllm/
+bash roteiro.sh destruir vllm                # only after trazer
+cd .. && python3 resumir.py --preco <US$/h> --needle-ref 3/500 ../resultados/vast-<date>/vllm/vast-vllm-dcp1-rep
+```
+
+Arms (`rodar <motor> <arm>`, Observed in `roteiro.sh`): `vllm/r1` (DCP4), `vllm/dcp1`, `vllm/dcp1-rep`, `vllm/r1-rep` (agents only), `vllm/lmcache` and `vllm/lmcache-controle` (DCP4, agents only, `AGENTE_PENSA` 20-60), `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-controle` (DCP1, `KV_CACHE_BYTES` default 30064771072, about 3.5M tokens, `AGENTE_PENSA` 60-100), and SGLang arms (`ormandj`, `nvfp4`, `nvfp4-1d00738`, `nvfp4-marlin`, `nvfp4-marlin-limpo`, `nvfp4-fp32ssm`, `nvfp4-semspec`). `rodar` forwards `AGENTES`, `SO_AGENTES`, `NEEDLE_RUNS`, `PARAR_NO_PORTAO` and sets `EXECUCAO=direto`. Other knobs: `DISCO_GB`, `IMAGEM_SGLANG`, `CHECKPOINT` (`fp8`, `nvfp4`, `nvfp4-1d00738`), `SEM_CHECKPOINT=1` (validate without download). Remote results land in `resultados/vast-<motor>-<arm>`.
+
+`preparar.sh` (inside the instance, idempotent): host record, bench venv with `--system-site-packages`, checkpoint download at a pinned revision (vLLM: `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33efa73c3bb7c95b74eee10cad34f9be`), then the 4-GPU all-reduce microbenchmark. Long commands run under `setsid -f nohup` with logs in `/workspace/infer/logs/`.
+
+### Qualify a host quickly
+
+Start the server, then run only the C32 decode with the same parameters `comparativo.sh` uses:
+
+```bash
+python3 f3/llm-inference-bench/llm_decode_bench.py --port 8000 --concurrency 32 --contexts 0 \
+  --duration 30 --max-tokens 8192 --skip-prefill --output qual-c32.json
+```
+
+Discard the host below 1,400 tok/s (DCP1). The JSON field name for aggregate tok/s is not recorded in our sources; read it from the log or the file.
+
+### Judge a gate-only run
+
+`resumir.py` needs at least one `agentes-<N>.json` and raises `FileNotFoundError` without it. For a directory from `SO_PORTAO=1`, call its Fisher function directly:
+
+```bash
+cd f3/sglang
+python3 -c "import json,resumir as r;s=json.load(open('<dir>/needle.json'))['selected_summary'];e=s['attempted']-s['correct'];print(e,s['attempted'],r.fisher_unilateral(e,s['attempted'],3,500))"
+```
+
+The arm fails if the printed p is below 0.05. Repeat for `needle-c16.json`.
+
+### Test the summarizer
+
+`f3/sglang/test_resumir.py` has 20 tests, no GPU needed: `cd f3/sglang && uvx pytest test_resumir.py` (`docs/03` §5).
+
+### Report a result
+
+Each result line in `docs/` or a report carries:
+
+- the evidence label, and whether it is the real model;
+- engine, image tag, checkpoint and revision, profile (TP, DCP, MTP, cache mode);
+- host: provider, machine or instance ID, region, GPU edition, driver version, P2P status, C32 decode;
+- date of the run, and price in US$/h with the date it was read;
+- number of runs, and the margin to the SLO limit when it is small;
+- the result directory under `f3/resultados/` and the `resumir.py` command with its `--preco` and `--needle-ref`.
+
+Example of the expected form: "vLLM DCP1, 24 agents inside the SLO, TTFT p95 4.93 s, one run (Observed (real), Vast host 157204, Nevada, driver 615.71.09, 2026-11-11, US$ 5.61/h, `f3/resultados/vast-20261111/vllm/vast-vllm-dcp1`)".
+
+## Invariants
+
+1. Gate before speed. A speed number from an arm that failed the gate is not reported as a result. A broken numeric path can be fast.
+2. Two runs before a capacity number is used for a decision. Single runs passed and failed the same level (§29.6).
+3. Compare arms only on the same host, or on hosts that each passed qualification and are named. Same software gave 5 times lower decode on another host (§29.10).
+4. Price is the price of the machine where the run happened, with its date. The metric divides by it.
+5. Count only steady-state cached turns, at least 20 per level, and size each level long enough to get them after the cold queue (16 agents needed about 416 s of queue).
+6. A level that passes after a smaller one failed does not raise the count. Capacity is monotone by definition.
+7. Reference for the needle is `3/500` unless a new reference arm is measured with at least 500 runs; change `--needle-ref` explicitly and say so.
+8. Launch the server only through a script that `comparativo.sh` copies into the result directory (`servidor.sh`). A flag typed by hand is not recorded, and the run cannot be repeated.
+9. A KV-tier test must keep the number of active agents within what the SLO allows (about 24 with DCP1). Otherwise it measures overload (§29.8, `docs/06` phase 4).
+
+## Pitfalls we hit
+
+- **Cold first-turn queue.** All agents start together with 40K to 100K tokens. With 7-minute levels no turn left the queue and 8 agents "failed" at 33 s TTFT p95. Fixed by the steady-state rule and per-level durations (`8:600 16:900 32:1500`) (§29.3).
+- **Single runs.** DCP4 at 16 agents passed by 0.23 s and failed the repeat (§29.6). SGLang FP8 needle went 117/120 then 119/120 on two runs (§29.1).
+- **`comparativo.sh` used to stop on any needle error.** Until 2026-11-12, `PARAR_NO_PORTAO=1` stopped when any run in `needle.json` or `needle-c16.json` was wrong (the old 120/120 rule), and `NEEDLE_RUNS` defaulted to 120. At the reference's 0.6% error rate a good arm would come out clean only about half the time at 120 runs (Inferred: 0.994^120 is about 0.49), and the DCP1 run of 2026-11-11 (3/120 and 1/120) would have stopped. Since 2026-11-12 the script calls `resumir.passa_needle` with `NEEDLE_REF` (default 3/500), and `NEEDLE_RUNS` defaults to 500 in `comparativo.sh` and `roteiro.sh`. Check that your copy of the harness has this before trusting `PARAR_NO_PORTAO`.
+- **Overloaded LMCache test.** 48 agents with 20 to 60 s think time and 5 GiB of KV per GPU: queue time became activity, all sessions competed for HBM and both arms collapsed (391 s / 502 s TTFT p50 / p95 with LMCache). It measured overload, not restore TTFT. 90 restores waited for GPU space and 9 gave up after 133 to 185 s (§29.8). The corrected arms `lmcache-dcp1` and `lmcache-dcp1-controle` have not run.
+- **Interrupted level leaves no file.** `llm_decode_bench.py` writes only finished scenarios, so the LMCache control run has no `agentes-48.json` (§29.8, §29.9 item 3). Let levels finish, or size `AGENTES` durations so they do.
+- **SSH drops on Vast.** `setsid nohup ... &` held the SSH session until the arm ended; now `setsid -f` (§29.3). SSH to Vast hosts drops often; wrap remote calls in a retry. `roteiro.sh` retries only in `esperar`; `rssh` itself does not retry.
+- **Waiting loops that match themselves.** A `pgrep -f name` loop inside an `ssh` whose command line contains `name` matched itself; an 8-GPU VM stayed on for 6 h 8 min with no result, about US$ 88 (Inferred cost, §25.3). Also `a && b || c` runs `c` when `b` succeeds (§25.3).
+- **Vast CLI quirks.** The CLI does not filter offers by `id=`; `status_msg` is null while the image downloads; `vastai destroy` asks for confirmation and "Aborted." exits 0, so `roteiro.sh` uses `-y` and forgets the instance only on confirmation (§28.2).
+- **Comparing numbers across hosts and drivers.** C1 on Vast was 22% above R1 on Nebius, attributed (Inferred) to the all-reduce; C32 was 10% below (§29.2). Host 48294 was 5 times slower with the same software (§29.10). Never put numbers from different hosts in one comparison without naming each host.
+- **SGLang omits `cached_tokens`.** Handled in `resumir.py`; a server started without cache reporting makes it fail loudly (§29.4).
+- **Harness is not the demand model.** The agent has 0 to 3 s think time, no sub-agent fan-out and no human pauses. How measured sessions map to demand-model streams is not measured (`docs/01` open questions).
+
+## Open questions
+
+1. Does DCP1 hold 24 agents in a second run on a qualified host? (§29.9 item 1; `docs/06` phases 1 and 2)
+2. Capacity between 24 and 32 agents: no level tested in between.
+3. Why was host 48294 5 times slower? Unknown.
+4. Does `g7e.24xlarge` pass qualification: P2P between the 4 GPUs, the B12X PCIe all-reduce, the AWS driver version, C32 of at least 1,400 tok/s? Nothing has run on AWS (`docs/06`).
+5. What is the restored-turn TTFT with LMCache, without a queue (the corrected §29.8 test)?
+6. Should the bench save interrupted levels? The fix is listed (§29.9 item 3) and not done.
+7. Is 1,400 tok/s the right threshold? It comes from two hosts, measured with DCP1.
+
+## Sources
+
+- `ARQUITETURA.md` (in `/home/paulo/Projetos/infer`): §20, §24.2, §25.1, §25.3, §26.4, §27.3, §27.4, §28 (all), §29 (all).
+- `docs/01-product-demand-and-slo.md` (SLO and primary metric), `docs/03-serving-engine-and-benchmarks.md` (results, gate, host qualification, reproduction), `docs/06-aws-implementation-plan.md` (phases 1, 2, 4), `docs/README.md` (contradictions).
+- Code: `f3/sglang/comparativo.sh`, `f3/sglang/resumir.py`, `f3/sglang/test_resumir.py`, `f3/sglang/vast/roteiro.sh`, `f3/sglang/vast/preparar.sh`, `f3/llm-inference-bench/llm_decode_bench.py` (`sched_run_agents`, `--sched-agent*` options).
+- Results: `f3/resultados/vast-20261111/` (engine comparison, DCP4 repeat, DCP1, LMCache), `f3/resultados/vast-20261112/vllm/` (DCP1 on host 48294).

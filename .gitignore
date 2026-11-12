@@ -1,2 +1,5 @@
-.claude/
+.claude/settings.local.json
 BACKLOG.md
+__pycache__/
+.pytest_cache/
+bench/vast/state/
