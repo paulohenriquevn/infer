@@ -46,7 +46,7 @@ Vast.ai host 157204 (Nevada, 4x RTX PRO 6000 Server Edition, US$5.61/h, driver 6
 | 16 agents: TTFT p95, tok/s p50 | 4.77 s, 57.2 (pass) | 5.20 s, 57.8 (fail) | 4.71 s, 70.8 (pass) |
 | 24 agents: TTFT p95, tok/s p50 | not measured | 5.97 s, 47.1 (fail) | 4.93 s, 55.3 (pass) |
 
-The SLO behind "pass" is TPOT p50 of 30 tok/s per stream and TTFT p95 of 5 s on a cached turn (Hypothesis adopted for the MVP, §20, §26.4). Under the two-run rule of §27.4, DCP4's guaranteed capacity drops to 8 agents, because run 2 at 16 agents missed the TTFT target (§29.6). DCP1 still needs its second speed run (§29.9).
+The SLO behind "pass" is TPOT p50 of 30 tok/s per stream and TTFT p95 of 5 s on a cached turn (Hypothesis adopted for the MVP, §20, §26.4). Run 2 of DCP4 at 16 agents missed the TTFT target (§29.6). §29.6 calls 8 agents its guaranteed capacity, but level 8 passed in run 1 and was not repeated (run 2 tested only 16 and 24), so no DCP4 capacity is confirmed by two runs yet. DCP1 still needs its second speed run (§29.9).
 
 On this host, small all-reduce took 9.1 to 9.5 µs against 32.1 to 57.4 µs on Nebius R1, where the driver P2P override was not in effect, and C1 decode was 22% higher than R1 (Observed; the causal link is Inferred, §28.2, §29.2).
 
@@ -193,7 +193,7 @@ From §29.10: the same "4x RTX PRO 6000" listing can deliver several times less 
 
 1. Start the server with the production image, checkpoint and flags.
 2. Run a C32 decode test with the harness, about 5 minutes after the server is up.
-3. Discard the host if aggregate C32 decode is below 1,400 tok/s.
+3. Discard the host if aggregate C32 decode with the DCP1 profile is below 1,400 tok/s (DCP4 gives about 1,280 on a good host).
 
 The threshold sits below the 1,423 to 1,580 tok/s measured on good hosts (Observed, §12.2, §29.6) and far above the 296 tok/s of host 48294. It applies to Nebius VMs and AWS instances too, since nothing guarantees uniform hosts there either (Inferred).
 
@@ -267,7 +267,7 @@ Process lessons (Inferred from the above): set a provider-side budget before any
 ## Open questions
 
 - AWS: current G7e on-demand and commit prices, regions and zones with capacity, our G/VT quota and the lead time for raising it, whether GPU P2P works inside `g7e.24xlarge`, whether the fork image runs on the AWS driver, and whether EFA gives usable RDMA for KV transfer. None was tested.
-- Does G7e pass the host qualification rule (C32 decode of at least 1,400 tok/s)?
+- Does G7e pass the host qualification rule (C32 decode of at least 1,400 tok/s with DCP1)?
 - Vast.ai: same-datacenter placement, private networking and shared storage (asked, unanswered on 2026-11-12). The cause of host 48294's low throughput.
 - Nebius: quota increase lead time (V10), reservation pricing and any commit discount (Unknown, §18.2), preemptible capacity for the 8-GPU RTX VM, real shared-filesystem read bandwidth.
 - Second DCP1 speed run on a qualified host, and the LMCache test with 24 active agents (§29.9). These decide sessions per replica, which drives every fleet number above.

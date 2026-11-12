@@ -5,7 +5,7 @@
 - **Engine decision (2026-11-12):** production runs the local-inference-lab fork of vLLM (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`) with the checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, 4 RTX PRO 6000 per replica, TP4 with MTP3. SGLang was measured on the same host and rejected. (ARQUITETURA.md §29.7)
 - **Still open:** DCP1 or DCP4, and whether the LMCache RAM tier earns its place. DCP1 served 24 agents inside the SLO in one run; the second speed run landed on a bad host and is not valid (§29.10).
 - **Quality gate:** needle-checksum, 500 runs at concurrency 8, one-sided Fisher exact test against the reference (vLLM DCP4, 3 errors in 500), fail at p < 0.05. Implemented in `f3/sglang/resumir.py`.
-- **Host qualification:** the same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host. Every new host runs a short C32 decode test first and is discarded below 1,400 tok/s.
+- **Host qualification:** the same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host. Every new host runs a short C32 decode test first and is discarded below 1,400 tok/s with the DCP1 profile.
 
 Evidence labels used below: Observed (we measured it), Reported (a named source says it), Inferred (reasoning from other data, link given), Hypothesis (to validate), Unknown.
 
@@ -57,7 +57,7 @@ Readings:
 - SGLang is faster per request (decode C1 +11%, prefill about 30% shorter with FP8) but serves half the sessions with FP8, because 16 contexts of 60K to 110K tokens do not fit 1.05M tokens of KV (Observed: `full token usage: 0.99`, 20 requests queued). (§29.2)
 - With NVFP4 weights SGLang matches vLLM at 16 agents with 3 times lower TTFT, but fails quality (§2.2) and runs out of KV between 16 and 32 agents. (§29.4)
 - In every arm, each turn recomputes 3,200 to 3,800 tokens (p50) and 5,300 to 5,900 (p90) even with 97% of the prompt cached. That tail, which the hybrid KDA cache does not reuse, drives vLLM's TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32. (Observed, §29.2)
-- vLLM DCP4 sits on the 5 s TTFT limit at 16 agents: it passed once with 0.23 s margin and failed the repeat. Under the two-run rule its guaranteed capacity is 8 agents. (§29.6)
+- vLLM DCP4 sits on the 5 s TTFT limit at 16 agents: it passed once with 0.23 s margin and failed the repeat. §29.6 calls 8 agents its guaranteed capacity, but level 8 passed in run 1 and was not repeated (run 2 tested only 16 and 24), so no DCP4 capacity is confirmed by two runs yet. (§29.6)
 - DCP1 is 6% to 24% faster in decode and passed 24 agents, but in one run with 0.07 s margin, and with 3.4 times less KV, which matters when idle sessions must leave HBM. (§29.6)
 
 ### 2.2 Quality: needle-checksum (Observed)
@@ -68,7 +68,7 @@ The needle-checksum probe (8K-token prompt, temperature 0) asks the model to fin
 |---|---|---|---|
 | vLLM DCP4 (reference) | 3 / 500 | 0 / 120 | |
 | vLLM DCP1, both runs | 3 / 620 | 1 / 240 | passes |
-| SGLang FP8 | 4 / 480 | 0 / 240 | 0.72 (two-sided) |
+| SGLang FP8 | 4 / 240 | 0 / 240 | 0.72 (two-sided, on 4/480 pooled) |
 | SGLang NVFP4 `1d00738`, MoE W4A4 | 60 / 500 | 19 / 120 | 2e-15 |
 | Same, MoE in Marlin (W4A16) | 32 / 500 | 5 / 120 | 3e-7 |
 | Same, Marlin, no speculation, SSM state FP32 | 22 / 500 | 10 / 120 | 1e-4 |
@@ -86,7 +86,7 @@ What the diagnosis established:
 
 Host 48294 (Texas, datacenter, US$ 7.03/h, reliability 0.965), same image, checkpoint and harness:
 
-- Quality valid: needle 500/500 at C8 and 120/120 at C16, gsm8k 99%.
+- Quality valid: needle 500/500 at C8 and 120/120 at C16, gsm8k 96/96 (the raw `gsm8k.json`; §29.10 says 99%).
 - Speed not valid: decode 108 / 298 / 350 / 296 tok/s at C1 / C8 / C16 / C32 (vs 154 / 696 / 1,072 / 1,578 on host 157204); 1,084 s to start vs 260 s; at 16 agents only 2 or 3 requests ran with 21 queued and 5% KV used.
 - Cause Unknown. One difference: host 48294 ran GPU driver 580.95.05, host 157204 ran 615.71.09 (the image expects 615.65.02 or newer, §25). Nebius R1 ran driver 580.173 and reached 1,425 tok/s at C32, so the driver alone does not explain 296 tok/s (Inferred). Same PCIe topology (GPU0 on the other socket), same B12X PCIe one-shot all-reduce, links at Gen5 x16; GPUs drew about 116 W during the agent run. Hypothesis: something outside the GPUs (another tenant on the 8-GPU host, CPU or memory).
 
@@ -151,7 +151,7 @@ Before any measurement or reservation on a new host:
 
 1. Record `nvidia-smi topo -m`, P2P status and the all-reduce microbenchmark (`f3/sglang/vast/preparar.sh` does it).
 2. Start the server and run decode at C32 for 30 s.
-3. Discard the host if C32 is below 1,400 tok/s (host 157204 gave 1,580; host 48294 gave 296).
+3. Discard the host if C32 with the DCP1 profile is below 1,400 tok/s (host 157204 gave 1,580; host 48294 gave 296; DCP4 gave 1,279 to 1,288 on host 157204, so the threshold is not for DCP4).
 
 The threshold comes from two hosts only; treat it as a starting rule, not a calibrated one.
 

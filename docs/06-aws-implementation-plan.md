@@ -54,14 +54,14 @@ Acceptance criteria (values from host 157204 in parentheses, Observed):
 1. `nvidia-smi topo -p2p r` reports OK between all 4 GPUs, and the server log contains `Using B12X PCIe all-reduce`.
 2. Decode at C32 is at least 1,400 tok/s (1,580 with DCP1, 1,279 with DCP4; the threshold applies to DCP1).
 3. `resumir.py --needle-ref 3/500` marks the run `ok`: needle-checksum with 500 runs at C8 is not worse than 3/500 at p < 0.05 (0/500 and 3/120 on the two DCP1 runs).
-4. gsm8k scores at least 94/96 (95/96 and 99%).
+4. gsm8k scores at least 94/96 (95/96 and 96/96 on the two DCP1 runs, raw `gsm8k.json`).
 5. The time from instance start to the first served request and the time to load weights are recorded in the result directory (`tempo-pronto.txt`, server log). No pass value: this is the baseline that phase 5 must improve.
 
 If criterion 2 fails, stop: the cause has to be found before buying more instances (§29.10 shows a host 5 times slower with the same software).
 
 ## Phase 2: choose DCP1 or DCP4
 
-Work: on the phase 1 instance, run the agent levels 16 and 24 twice with DCP1 and twice with DCP4 (`AGENTES="16:900 24:900"`, `SO_AGENTES=1` after the first run).
+Work: on the phase 1 instance, run the agent levels 16 and 24 twice with DCP1 and twice with DCP4 (`AGENTES="16:900 24:900"`; the second run of each profile with `SO_AGENTES=1` and its own output directory, `OUT` for `comparativo.sh` or `RODADA=2` for `roteiro.sh`, because a run overwrites its directory). `resumir.py` shows the second run's gate as not run there; the verdict comes from the first run.
 
 Acceptance criteria:
 

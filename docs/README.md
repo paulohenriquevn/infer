@@ -54,11 +54,14 @@ The journal grew over two weeks and some early numbers were superseded without b
 | Topic | Earlier text | Current value |
 |---|---|---|
 | KV per 256K session | 1.62 GB (§2, §3, §8.3) | about 2.3 GB (8.7 KB per token plus about 0.15 GB of KDA state; §2 correction, §9.3); §10.1 and §13.2 give 2.2 and 2.28 GB |
-| Streams per replica in the fleet table | 40 (§18.1, §20.1) | 24 agent sessions inside the SLO with DCP1, 8 guaranteed with DCP4 (§29.6); §20 also says the 30 tok/s floor caps a replica at 32 streams |
+| Streams per replica in the fleet table | 40 (§18.1, §20.1) | 24 agent sessions inside the SLO with DCP1 (one run), 8 with DCP4 (one run; §29.6 calls it guaranteed, see below); §20 also says the 30 tok/s floor caps a replica at 32 streams |
 | Replicas for the 10,000-user base case | 22 (§18.1) | 35 to 44 after the Weka corpus (§24.3), still before the measured capacity above |
 | Cost per user (§19.1) | US$ 15.8 to 25.2 per month | Out of date: depends on the 40-stream assumption |
 | Needle gate | 120/120 (§27.4) | Fisher test against 3/500 (§29.5) |
-| vLLM DCP4 capacity | 16 agents (§29.1) | 8 guaranteed under the two-run rule (§29.6) |
+| vLLM DCP4 capacity | 16 agents (§29.1); 8 guaranteed under the two-run rule (§29.6) | 16 failed on repeat; level 8 passed only in run 1 (run 2 tested 16 and 24), so no DCP4 capacity is confirmed by two runs |
+| gsm8k on host 48294 | 99% (§29.10) | 96/96 in the raw `gsm8k.json` |
+| SGLang FP8 needle | 4/480 (§29.5) | 4/240 at C8 and 0/240 at C16; 4/480 is the pooled total |
+| Host qualification threshold | 1,400 tok/s at C32 (§29.10) | Applies to the DCP1 profile; DCP4 gave 1,279 to 1,288 on the good host 157204 |
 | LMCache version in the image | 0.5.5.dev0 (§15) | 0.5.3.dev453+lil, 2026-10-11 (§25.1, read from the image) |
 | Sessions per US$/h baseline | 12.3 (§12.4, §26.4) | That figure counts HBM capacity without an SLO; inside the SLO it is 2.85 to 4.28 (§29) |
 | Image driver | "tests driver 615.71.09" (§10.4) | expects 615.65.02 or newer (§25.1) |

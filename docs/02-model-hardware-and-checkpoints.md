@@ -94,7 +94,7 @@ Operational details that cost us time (Observed, §25.3): the Nebius image alrea
 
 Effect of the override on server decode: Unknown. The P0 server never started in that session (§25.2). The faster decode on Vast machine 157204 (145.6 against 119.8 tok/s at C1) is attributed to the faster all-reduce, Inferred and not isolated (§29.2).
 
-A test before trusting any host: decode at C32 for about 5 minutes after the server is up, and discard the host below 1,400 tok/s (decision in §29.10).
+A test before trusting any host: decode at C32 for about 5 minutes after the server is up, and discard the host below 1,400 tok/s with the DCP1 profile; DCP4 gives about 1,280 on a good host (decision in §29.10).
 
 ### 2.3 All-reduce backend
 
@@ -152,7 +152,7 @@ Sizes are the sum of `.safetensors` files from the Hugging Face API (Observed, �
 
 | Checkpoint | Size | Fits 2 RTX (192 GB) | Fits 4 RTX (384 GB) | Fits 1 B300 (288 GB) | Licence | Quality evidence |
 |---|---|---|---|---|---|---|
-| `zai-org/GLM-5.3-Flash` (FP8) | 328.3 GB | no | yes, 56 GB left | no | MIT | SGLang FP8 needle 4/480, same as the vLLM fork reference (p = 0.72) (Observed, §29.5) |
+| `zai-org/GLM-5.3-Flash` (FP8) | 328.3 GB | no | yes, 56 GB left | no | MIT | SGLang FP8 needle 4/240 at C8 and 0/240 at C16, same as the vLLM fork reference (p = 0.72) (Observed, §29.5) |
 | `nvidia/GLM-5.3-Flash-NVFP4` (PTQ, ModelOpt) | 204.4 GB | no | yes | yes, 84 GB left | MIT | **Failed** the needle probe on upstream vLLM (B300) and SGLang (§3.3) |
 | `RedHatAI/GLM-5.3-Flash-NVFP4` | 197.8 GB | no | yes | yes, 90 GB left | Unknown | None |
 | `ormandj/...W4A16-NVFP4-K32-Experts-FP8-WO` (Helix) | 178.0 GB | yes, about 7 GB per GPU left | yes | yes | Unknown | None of ours |
@@ -173,7 +173,7 @@ What the NVIDIA NVFP4 quantizes: routed experts and the dense MLPs of the first 
 | `gsm8k`, 96 problems | 94/96 | same | Observed (§12.2) |
 | needle, DCP4, 500 runs at C8 | 3 errors in 500; 0 in 120 at C16 | Vast 157204, 2026-11-11 | Observed (§29.5, §29.6) |
 | needle, DCP1 | 3/120 at C8 (157204), then 500/500 at C8 and 120/120 at C16 (48294); total 3 in 620 at C8 | Vast, 2026-11-11 and 2026-11-12 | Observed (§29.6, §29.10) |
-| `gsm8k` | 94/96 on 157204; 99% on 48294 | Vast | Observed (§29.4, §29.10) |
+| `gsm8k` | 94/96 to 96/96 on 157204; 96/96 on 48294 (§29.10 says 99%; the raw `gsm8k.json` says 96/96) | Vast | Observed (§29.4, §29.10) |
 | AA-LCR (100 questions, 3 answers each, GPT-5.6 judge) | QAD 73.00%, published NVFP4 74.00%, BF16 71.67%; no statistical difference (McNemar p above 0.40) | `rtx6kpro` | Reported (§10.1) |
 | Behavioural fidelity, 7,168 tasks | equivalent within 1 point | `rtx6kpro` | Reported (§10.1) |
 | aider polyglot, 5 runs | pass@2 88.0 ± 1.1% | `rtx6kpro`, for their checkpoints | Reported (§10.1) |

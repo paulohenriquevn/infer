@@ -198,8 +198,8 @@ NVFP4 QAD checkpoint, TP4, MTP3. Results in `f3/resultados/vast-20261111/vllm/` 
 - DCP1 passed at 24 agents in **one run only**, with 0.07 s of TTFT margin. A second DCP1 run on
   another machine (48294, §29.10) produced invalid speed numbers (decode about 5 times lower, GPUs
   near idle, cause Unknown), so 24 is still unconfirmed.
-- DCP4 at 16 agents did not reproduce. Under the two-run rule of §27.4 its guaranteed capacity drops
-  to 8 agents (§29.6).
+- DCP4 at 16 agents did not reproduce. §29.6 calls 8 agents its guaranteed capacity, but
+  level 8 passed in run 1 and was not repeated (run 2 tested only 16 and 24), so no DCP4 capacity is confirmed by two runs yet (Observed in `vast-vllm-r1/` and `vast-vllm-r1-rep2/`).
 - Agent levels tested were 8, 16, 24 and 32, so "sessions in SLO" is a lower bound (§29.2).
 - The harness agent is close to one continuous stream: think time 0 to 3 s, start context 40K to
   100K tokens, tool results 1K to 6K, responses 300 to 4,000 tokens, `--max-num-seqs 32` (Observed in
@@ -345,7 +345,7 @@ from 1 to 2 VMs.
 ## Open questions
 
 - **Second DCP1 run.** Does 24 sessions per replica hold on a machine that passes the C32 decode
-  check (at least 1,400 tok/s, §29.10)? Until then, capacity per replica that meets the two-run rule
+  check (at least 1,400 tok/s with DCP1, §29.10)? Until then, capacity per replica that meets the two-run rule
   is Unknown for DCP1 and 8 for DCP4.
 - **Capacity between 24 and 32.** Levels tested were 8, 16, 24, 32; the real ceiling is Unknown.
 - **GLM output per call (O) and request time.** Unknown until EK9; it drives φ and the replica count
