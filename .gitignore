@@ -1,2 +1,13 @@
-.claude/
+.claude/settings.local.json
 BACKLOG.md
+__pycache__/
+.pytest_cache/
+bench/vast/state/
+# Benchmark harness: upstream bench clone made by bench/setup_bench.sh, and raw results of new runs.
+# Raw results are published as a separate results archive, not in git.
+bench/llm-inference-bench/
+bench/results/
+/results/
+# Evidence archive from scripts/fetch_evidence.sh (published as a GitHub release, not in git)
+/f3/
+/ARQUITETURA.md

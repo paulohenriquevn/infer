@@ -1,0 +1,15 @@
+## Variant B of the A/B: load-only routing (no prefix affinity).
+## Layer after router-mini.values.yaml.
+router:
+  epp:
+    pluginsCustomConfig:
+      optimized-baseline-plugins.yaml: |
+        apiVersion: llm-d.ai/v1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: inflight-load-producer
+        - type: token-load-scorer
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: token-load-scorer

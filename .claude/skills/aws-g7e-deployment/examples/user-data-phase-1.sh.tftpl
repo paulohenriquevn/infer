@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# Phase 1 bootstrap for one g7e.24xlarge running the DLAMI Base OSS Nvidia Driver GPU AMI (Ubuntu 24.04).
+# Draft: illustrative, not run on any instance. Steps and reasons: references/terraform-layout.md.
+#
+# This file is a Terraform templatefile(). Only these placeholders are filled in by Terraform:
+#   max_runtime_minutes, cache_volume_id, results_uri
+# Shell variables below are written as $NAME, without braces, so templatefile() leaves them alone.
+#
+# It stops after the weights are on disk (marker weights-ready). Bench setup, the all-reduce
+# microbenchmark, the run and the copy to S3 are done by hand over SSM in phase 1 (runbook section 5).
+# No tokens or keys here: user data is readable by anyone allowed to describe the instance.
+set -euo pipefail
+
+exec > >(tee -a /var/log/infer-bootstrap.log) 2>&1
+STEPS=/var/lib/infer/steps
+mkdir -p $STEPS
+mark() { date -u +%FT%TZ > "$STEPS/$1"; echo "== step done: $1 at $(date -u +%T)"; }
+
+# 1. Watchdog first: with instance_initiated_shutdown_behavior = terminate, this ends the instance.
+shutdown -h +${max_runtime_minutes} "infer watchdog: max runtime reached"
+mark watchdog-armed
+
+# 2. Driver and GPUs. Record, do not stop on the version: qualification decides.
+nvidia-smi --query-gpu=index,name,driver_version,persistence_mode,power.limit,pcie.link.gen.max,pcie.link.width.current --format=csv
+GPU_COUNT=$(nvidia-smi --query-gpu=index --format=csv,noheader | wc -l)
+if [ "$GPU_COUNT" -ne 4 ]; then
+  echo "expected 4 GPUs, found $GPU_COUNT; stopping here for a person to look" >&2
+  exit 1
+fi
+mark gpus-checked
+
+# 3. Host record, same content as bench/vast/prepare_host.sh step 1.
+HOST_DIR=/var/lib/infer/host
+mkdir -p $HOST_DIR
+{
+  echo "== nvidia-smi"; nvidia-smi
+  echo "== topo -m"; nvidia-smi topo -m
+  echo "== P2P read"; nvidia-smi topo -p2p r
+  echo "== RegistryDwords"; grep RegistryDwords /proc/driver/nvidia/params || echo "not present"
+  echo "== cpu/mem/disk"; nproc; free -g; lsblk -o NAME,SIZE,TYPE,MODEL,SERIAL,MOUNTPOINT; df -h
+} > $HOST_DIR/host.txt 2>&1
+mark host-recorded
+
+# 4. Storage. Instance store: the DLAMI mounts it at /opt/dlami/nvme (Reported); whether it stripes
+#    both devices on g7e.24xlarge is Unknown, so record what is there and stop if it is missing.
+if ! mountpoint -q /opt/dlami/nvme; then
+  echo "/opt/dlami/nvme is not mounted; build the RAID 0 by hand and rerun from here" >&2
+  exit 1
+fi
+df -h /opt/dlami/nvme
+mark nvme-checked
+
+#    Kernel cache volume. EBS volumes on Nitro appear as NVMe devices; the by-id name carries the
+#    volume ID without its dash (Inferred from the EBS NVMe naming; confirm on the first instance).
+#    The attachment is created after the instance, so wait for it.
+VOL_ID=${cache_volume_id}
+CACHE_DEV=/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo $VOL_ID | tr -d '-')
+for _ in $(seq 1 60); do
+  if [ -e "$CACHE_DEV" ]; then break; fi
+  sleep 5
+done
+if [ ! -e "$CACHE_DEV" ]; then
+  echo "cache volume $VOL_ID did not appear at $CACHE_DEV" >&2
+  exit 1
+fi
+if ! blkid "$CACHE_DEV" > /dev/null 2>&1; then
+  mkfs.ext4 -q -L infer-cache "$CACHE_DEV"
+fi
+mkdir -p /cache
+if ! mountpoint -q /cache; then
+  mount "$CACHE_DEV" /cache
+fi
+mark cache-mounted
+
+# 5. Docker and the NVIDIA container toolkit ship with the DLAMI (Reported). Check, then pull and time.
+IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016
+docker info > /dev/null
+START=$(date +%s)
+docker pull $IMAGE
+echo "image pull took $(( $(date +%s) - START )) s" | tee $HOST_DIR/image-pull-time.txt
+docker run --rm --gpus all --entrypoint nvidia-smi $IMAGE -L
+mark image-ready
+
+# 6. Weights at the pinned revision into the Hugging Face cache layout on NVMe.
+#    Unauthenticated: HF_TOKEN is never put in user data. If the Hub throttles, rerun this step by
+#    hand over SSM with the token in that session's environment.
+MODEL=local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD
+REVISION=dec48abd33efa73c3bb7c95b74eee10cad34f9be
+export HF_HOME=/opt/dlami/nvme/hf
+mkdir -p $HF_HOME
+python3 -m venv /opt/infer/hf-venv
+# huggingface_hub version is not pinned in this draft; pin it before use.
+/opt/infer/hf-venv/bin/pip install --quiet 'huggingface_hub[cli]'
+START=$(date +%s)
+/opt/infer/hf-venv/bin/hf download $MODEL --revision $REVISION
+echo "weights download took $(( $(date +%s) - START )) s" | tee $HOST_DIR/weights-download-time.txt
+#    Offline vLLM resolves the model through refs/main, which a --revision download does not write.
+REFS=$HF_HOME/hub/models--local-inference-lab--GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD/refs
+mkdir -p $REFS
+printf '%s' $REVISION > $REFS/main
+du -sh $HF_HOME/hub
+mark weights-ready
+
+echo "bootstrap done; results go to ${results_uri} after the run (runbook section 5)"
