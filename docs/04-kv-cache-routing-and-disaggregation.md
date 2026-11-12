@@ -150,12 +150,12 @@ Limits of the PR: it covers only L1, does not publish while the engine is idle, 
 
 ## 3. LMCache under HBM pressure: the §29.8 experiment
 
-Real model, fork image, 4 RTX PRO 6000 on Vast.ai, 2026-11-12. All Observed. Results in `f3/resultados/vast-20261111/vllm/vast-vllm-lmcache*`.
+Real model, fork image, 4 RTX PRO 6000 on Vast.ai, 2026-11-12. All Observed. Results in the results archive: `f3/resultados/vast-20261111/vllm/vast-vllm-lmcache*`.
 
 Two arms of the harness:
 
-- `vllm/lmcache`: the server started by the image's own launcher (`f3/sglang/servidor-vllm-lmcache-direto.sh`) with our vLLM profile and `LMCacheRecurrentCheckpointConnector`. L1 of 200 GB in `/dev/shm`.
-- `vllm/lmcache-controle`: same server, cache in HBM only.
+- `vllm/lmcache`: the server started by the image's own launcher (`bench/server-vllm-lmcache-direct.sh`) with our vLLM profile and `LMCacheRecurrentCheckpointConnector`. L1 of 200 GB in `/dev/shm`.
+- `vllm/lmcache-control`: same server, cache in HBM only.
 
 Both ran DCP4, with KV limited to 5 GiB per GPU (about 2.5 million tokens), and 48 agents with 20 to 60 s of think time between turns.
 
@@ -172,7 +172,7 @@ Findings:
 - The mechanism works. The log shows 62 recurrent-state restores started and 1 that failed and was recomputed.
 - LMCache does not raise concurrent capacity. 90 restores waited for GPU space, and 9 gave up after 133 to 185 s and recomputed the prompt. Restored KV has to fit in HBM again.
 - Design flaw: the test assumed think time would keep about 23 agents active (Inferred). With turns queued for minutes, queue time became activity, all 48 sessions competed for HBM, and both arms collapsed. The run measures overload behaviour, not the TTFT of a restore in steady state.
-- The control arm has no complete `agentes-48.json`, because the bench writes only finished scenarios and the run was interrupted (§29.8, §29.9 item 3).
+- The control arm has no complete `agentes-48.json` (the file name the harness used then), because the bench writes only finished scenarios and the run was interrupted (§29.8, §29.9 item 3).
 
 Design consequence (Inferred, §29.8): capacity per replica is HBM divided by the context of active sessions. With DCP1, 6.8 million tokens hold about 60 active sessions of 100K tokens, more than the 24 that the SLO computation allows.
 
@@ -229,7 +229,7 @@ Not proven: behaviour under memory pressure, with more than 2 replicas, or with 
 
 ### 5.1 What we tested on the mini (§9.2)
 
-Same 2 RTX GPUs and same load: 1 prefill + 1 decode replica with NIXL over TCP (`f3/llmd/pd/pd.yaml`, vLLM reference proxy) against 2 aggregated replicas. Cold unique prompts of 17,408 tokens, output 128, closed loop, warm-up discarded. Data in `f3/resultados/pd-20261105/`. All Observed on the mini.
+Same 2 RTX GPUs and same load: 1 prefill + 1 decode replica with NIXL over TCP (`router/pd/pd.yaml`, vLLM reference proxy) against 2 aggregated replicas. Cold unique prompts of 17,408 tokens, output 128, closed loop, warm-up discarded. Data in `f3/resultados/pd-20261105/`. All Observed on the mini.
 
 - P/D works on the hybrid KDA + MLA mini. The decode side computed 1 token and received 17,707 (and 40,299) tokens via `external_kv_transfer`. Logprobs of P/D and aggregated differed by at most 0.0235, the same order as aggregated with and without prefix cache (up to 0.0234), so there is no sign of error in KDA state transfer.
 - Recipe gaps on SM120: `VLLM_KV_CACHE_LAYOUT=HND` failed (`valid layouts: ['BLHNC']`); UCX tried the RDMA device `mlx5_0` and failed; `UCX_NET_DEVICES=eth0` with `UCX_TLS=tcp,cuda_copy` worked.

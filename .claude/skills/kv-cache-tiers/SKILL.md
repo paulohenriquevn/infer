@@ -10,7 +10,7 @@ This skill covers where KV lives for one replica (4x RTX PRO 6000 Server Edition
 Conventions:
 
 - Section references such as §29.8 point to `ARQUITETURA.md` (Portuguese journal). Later sections and notes marked "Correção posterior" replace earlier text; §17 replaces §13.2, §15 and §16 where they conflict.
-- `ARQUITETURA.md` and every harness path written as `f3/...` currently live in `/home/paulo/Projetos/infer`, outside this repository.
+- `ARQUITETURA.md` lives outside this repository. Harness paths (`bench/`, `router/`) are relative to the root of this repository; raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive.
 - Evidence labels: Observed (we measured it), Reported (a named source says it), Inferred (derived, link stated), Hypothesis (to validate), Unknown.
 - "Mini" means the `glm5next` mini test model: random weights, 2 full attention layers, about 1.95 KB of KV per token, 1 GPU per replica, upstream vLLM 0.32.0. Mini results transfer as mechanisms, never as numbers. Every row without the word "mini" is the real model.
 - Nothing in this skill was measured on AWS.
@@ -72,7 +72,7 @@ Why LMCache:
 - The community qualified it on TP4 + DCP4, FP8 KV, MTP3, engine-driven LMCache (Reported, rtx6kpro, §15).
 - The engine decision kept vLLM partly because this layer was qualified on it (Inferred, §29.7).
 
-How it runs (Observed in `f3/sglang/servidor-vllm-lmcache-direto.sh` and §29.8):
+How it runs (Observed in `bench/server-vllm-lmcache-direct.sh` and §29.8):
 
 - The image launcher (`python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie`, run from `/opt/lil`) starts and supervises both vLLM and the LMCache service. It refuses `--print-command` in this mode because it starts a second process.
 - LMCache runs as a separate multi-process (MP) server, one per vLLM instance, with ports derived from the API port (§17.2).
@@ -128,25 +128,25 @@ On AWS: `g7e.24xlarge` (4 GPUs, 1,024 GiB RAM) is one engine; `g7e.48xlarge` (8 
 Inside the fork image (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`):
 
 ```bash
-cd f3/sglang
+cd bench
 # LMCache arm: HBM prefix cache plus L1 in /dev/shm
 PIDFILE=srv.pid LOGFILE=srv.log CACHE_MODE=lmcache DCP=1 LMCACHE_L1_GB=200 \
-  KV_CACHE_BYTES=30064771072 bash servidor-vllm-lmcache-direto.sh
+  KV_CACHE_BYTES=30064771072 bash server-vllm-lmcache-direct.sh
 # Control arm: same server and KV size, HBM only
 PIDFILE=srv.pid LOGFILE=srv.log CACHE_MODE=vram DCP=1 \
-  KV_CACHE_BYTES=30064771072 bash servidor-vllm-lmcache-direto.sh
+  KV_CACHE_BYTES=30064771072 bash server-vllm-lmcache-direct.sh
 ```
 
-What the script does (Observed in the script): it runs `python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie` from `LAUNCHER_DIR` (default `/opt/lil`) with `--env DCP=... --env CACHE_MODE=... --env NCCL_NET_PLUGIN=none`, adds `--env LMCACHE_L1_GB=... --env LMCACHE_L2_ENABLED=0` in lmcache mode, and passes `--kv-cache-memory-bytes "$KV_CACHE_BYTES"` (default 5 GiB per GPU). It starts the launcher under `setsid`, so killing the PID in `PIDFILE` stops vLLM and LMCache together. `KV_CACHE_BYTES` is per GPU: 5 GiB is about 2.5 million tokens under DCP4, and under DCP1 the same bytes hold about a quarter of that because every GPU holds the whole KV (script comment). 28 GiB under DCP1 is about 3.5 million tokens (comment in `f3/sglang/vast/roteiro.sh`).
+What the script does (Observed in the script): it runs `python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie` from `LAUNCHER_DIR` (default `/opt/lil`) with `--env DCP=... --env CACHE_MODE=... --env NCCL_NET_PLUGIN=none`, adds `--env LMCACHE_L1_GB=... --env LMCACHE_L2_ENABLED=0` in lmcache mode, and passes `--kv-cache-memory-bytes "$KV_CACHE_BYTES"` (default 5 GiB per GPU). It starts the launcher under `setsid`, so killing the PID in `PIDFILE` stops vLLM and LMCache together. `KV_CACHE_BYTES` is per GPU: 5 GiB is about 2.5 million tokens under DCP4, and under DCP1 the same bytes hold about a quarter of that because every GPU holds the whole KV (script comment). 28 GiB under DCP1 is about 3.5 million tokens (comment in `bench/vast/vast.sh`).
 
 Before starting, check that `/dev/shm` is larger than `LMCACHE_L1_GB` (`df -h /dev/shm`), and that the container memory limit and node RAM cover it.
 
 ### Confirm in the logs what is running
 
 ```bash
-grep -n -i 'chunk' <result_dir>/servidor.log | head           # chunk size the LMCache server negotiated
-grep -c 'waiting for GPU capacity' <result_dir>/servidor.log   # restores blocked on HBM (AWS plan phase 4)
-grep -c 'KEY_NOT_READABLE' <result_dir>/servidor.log           # TTL expiry on retrieve
+grep -n -i 'chunk' <result_dir>/server.log | head             # chunk size the LMCache server negotiated
+grep -c 'waiting for GPU capacity' <result_dir>/server.log   # restores blocked on HBM (AWS plan phase 4)
+grep -c 'KEY_NOT_READABLE' <result_dir>/server.log           # TTL expiry on retrieve
 ```
 
 The `waiting for GPU capacity` line is the one `docs/06-aws-implementation-plan.md` phase 4 counts. In §29.8 the same log showed 62 recurrent-state restores started, 1 failed and recomputed, 90 that waited for GPU space and 9 that gave up after 133 to 185 s (Observed).
@@ -169,35 +169,35 @@ If the distribution name differs, find it with `pip list | grep -i lmcache`. Onl
 
 Design (§29.8, §29.9 item 2, `docs/06-aws-implementation-plan.md` phase 4): DCP1, KV pool cut so that active sessions fit and idle ones are evicted, many agents with long think time, LMCache against HBM only. It measures the TTFT of a restored turn without a queue.
 
-The sources describe it two ways. §29.8 says "DCP1 with normal KV, 24 active agents and idle sessions with minutes of think time". The arms in `roteiro.sh` and AWS phase 4 cut the KV to 28 GiB per GPU (about 3.5 million tokens), think 60 to 100 s, and docs 03 and 06 say 48 agents. Both aim at the same condition: about 24 or fewer sessions active at once, the rest idle. Phase 4 acceptance criterion 3 checks it.
+The sources describe it two ways. §29.8 says "DCP1 with normal KV, 24 active agents and idle sessions with minutes of think time". The arms in `vast.sh` and AWS phase 4 cut the KV to 28 GiB per GPU (about 3.5 million tokens), think 60 to 100 s, and docs 03 and 06 say 48 agents. Both aim at the same condition: about 24 or fewer sessions active at once, the rest idle. Phase 4 acceptance criterion 3 checks it.
 
-On Vast.ai (arms `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-controle`; renting GPUs costs money, get approval first):
+On Vast.ai (arms `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-control`; renting GPUs costs money, get approval first):
 
 ```bash
-cd f3/sglang/vast
-bash roteiro.sh criar vllm <offer_id>
-bash roteiro.sh esperar vllm && bash roteiro.sh enviar vllm && bash roteiro.sh preparar vllm
-AGENTES="48:<seconds>" bash roteiro.sh rodar vllm lmcache-dcp1
+cd bench/vast
+bash vast.sh create vllm <offer_id>
+bash vast.sh wait vllm && bash vast.sh send vllm && bash vast.sh prepare vllm
+AGENT_LEVELS="48:<seconds>" bash vast.sh run vllm lmcache-dcp1
 # when it finishes, on the same instance:
-AGENTES="48:<seconds>" bash roteiro.sh rodar vllm lmcache-dcp1-controle
-bash roteiro.sh trazer vllm && bash roteiro.sh destruir vllm
+AGENT_LEVELS="48:<seconds>" bash vast.sh run vllm lmcache-dcp1-control
+bash vast.sh fetch vllm && bash vast.sh destroy vllm
 ```
 
 On AWS, inside the fork container, the same arm is:
 
 ```bash
-cd f3/sglang
-SO_AGENTES=1 AGENTES="48:<seconds>" AGENTE_PENSA=60-100 DCP=1 KV_CACHE_BYTES=30064771072 CACHE_MODE=lmcache \
-  MOTOR=vllm EXECUCAO=direto IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
-  SERVIDOR=servidor-vllm-lmcache-direto.sh OUT=resultados/lmcache-dcp1 bash comparativo.sh
-# control: same command with CACHE_MODE=vram and OUT=resultados/lmcache-dcp1-controle
+cd bench
+AGENTS_ONLY=1 AGENT_LEVELS="48:<seconds>" AGENT_THINK=60-100 DCP=1 KV_CACHE_BYTES=30064771072 CACHE_MODE=lmcache \
+  ENGINE=vllm LAUNCH_MODE=direct IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
+  SERVER_SCRIPT=server-vllm-lmcache-direct.sh OUT=results/lmcache-dcp1 bash run_benchmark.sh
+# control: same command with CACHE_MODE=vram and OUT=results/lmcache-dcp1-control
 ```
 
-`SO_AGENTES=1` skips the quality gate and speed tests; run the gate once on the same server profile first. The level duration is not fixed by the sources. `comparativo.sh` sizes a level as the cold phase (about 25 s per agent, measured on Vast) plus about 7 min of steady state, which for 48 agents suggests about 20 min of cold phase alone (Inferred). Pick a duration, write it down, and use the same value in both arms.
+`AGENTS_ONLY=1` skips the quality gate and speed tests; run the gate once on the same server profile first. The level duration is not fixed by the sources. `run_benchmark.sh` sizes a level as the cold phase (about 25 s per agent, measured on Vast) plus about 7 min of steady state, which for 48 agents suggests about 20 min of cold phase alone (Inferred). Pick a duration, write it down, and use the same value in both arms.
 
 Acceptance (phase 4):
 
-1. Both arms write `agentes-48.json`. Never interrupt a level: the bench only saves finished scenarios (§29.9 item 3).
+1. Both arms write `agents-48.json`. Never interrupt a level: the bench only saves finished scenarios (§29.9 item 3).
 2. Report per arm: prefix-cache hit rate, external (LMCache) hit rate, TTFT p95 of cached turns, and the count of `waiting for GPU capacity` lines.
 3. Read from the server log how many requests ran at once. If more than about 24 ran together, the test repeated the §29.8 overload and its TTFT is not used.
 
@@ -208,7 +208,7 @@ Decision rule (phase 4): keep the LMCache tier if its arm has a lower TTFT p95 t
 - External prefix cache hit rate (KV served from LMCache) next to the local HBM prefix hit rate. On the mini these were reported separately as "local hit" and "from the external tier" (§7.2).
 - Count of restores waiting for GPU capacity, restores that gave up and recomputed, and `KEY_NOT_READABLE` errors.
 - HBM KV usage and running requests per replica, to see when active context, not idle context, is the limit.
-- Re-prefilled tokens per turn (prompt minus cached), which `resumir.py` prints as p50 and p90.
+- Re-prefilled tokens per turn (prompt minus cached), which `summarize.py` prints as p50 and p90.
 
 The exact Prometheus metric names for these on the fork are not in the sources (Unknown). Find them on a running server before building dashboards.
 
@@ -230,7 +230,7 @@ The exact Prometheus metric names for these on the fork are not in the sources (
 ## Pitfalls we hit
 
 - The §29.8 run (DCP4, KV cut to 5 GiB per GPU, 48 agents, 20 to 60 s think) assumed think time would keep about 23 agents active (Inferred). Turns queued for minutes, the queue became activity, all 48 sessions competed for HBM, and both arms collapsed: HBM-only finished 42 turns with 24 timeouts and 0% prefix hit; LMCache finished 118 turns with 21 timeouts, 65.6% prefix hit and TTFT p50/p95 of 391 s / 502 s on cached turns (Observed). It measures overload, not the TTFT of a restore.
-- The control arm of §29.8 was interrupted and its `agentes-48.json` is incomplete; numbers came from the log (§29.8, §29.9).
+- The control arm of §29.8 was interrupted and its `agentes-48.json` (the name used then) is incomplete; numbers came from the log (§29.8, §29.9).
 - On the mini, a working set larger than the pool, visited cyclically, drove the LRU prefix hit to 0%: LRU evicts exactly what comes next. With a RAM tier the hit came back to 97.1% (Observed on the mini, §7.2).
 - On the mini, a 1 GiB pool capped `--max-num-seqs` at 86 (`exceeds available Mamba cache blocks (86)`): KDA state blocks limit decode concurrency (Observed on the mini, §7.2).
 - On the mini, 34,816-token prompts with a 1 GiB pool crashed with `illegal memory access` twice; 17,408-token prompts did not. Cause Unknown; reproduce at 35K and 256K on the real model before scaling long contexts (§7.3).
@@ -258,4 +258,4 @@ The exact Prometheus metric names for these on the fork are not in the sources (
 - `docs/03-serving-engine-and-benchmarks.md` §3, §7, open questions
 - `docs/05-capacity-cost-and-providers.md` (G7e RAM, EFA) and `docs/06-aws-implementation-plan.md` (phase 4)
 - `ARQUITETURA.md` §2, §7.2 to §7.4, §9.3, §10.1, §12.2, §15, §16, §17, §25.1 (including the 2026-11-12 PR #5307 update under "Eventos de KV"), §29.6 to §29.9
-- Harness: `f3/sglang/servidor-vllm-lmcache-direto.sh`, `f3/sglang/vast/roteiro.sh`, `f3/sglang/comparativo.sh`, `f3/sglang/resumir.py`
+- Harness: `bench/server-vllm-lmcache-direct.sh`, `bench/vast/vast.sh`, `bench/run_benchmark.sh`, `bench/summarize.py`

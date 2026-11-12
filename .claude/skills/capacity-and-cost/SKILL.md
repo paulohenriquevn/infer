@@ -7,7 +7,7 @@ description: Use when sizing the fleet, estimating replicas or GPUs for a number
 
 How much demand 10,000 coding-agent users create, how much one replica holds inside the SLO, what that costs per provider, and how to turn those three into a fleet size and a cost per user. The fleet table in the docs is stale; this skill says why and how to redo it.
 
-Evidence labels: Observed (we measured it, path or section given), Reported (a named source says it), Inferred (derived, arithmetic shown), Hypothesis (to be validated), Unknown. "§N" points to `/home/paulo/Projetos/infer/ARQUITETURA.md`. "docs/0N" points to `docs/` in this repository. "10k report" is `/home/paulo/Projetos/infer/reports/Arquitetura para 10 mil usuários.md`. Every price carries the date it was read; a GPU price older than a few days is stale (docs/05).
+Evidence labels: Observed (we measured it, path or section given), Reported (a named source says it), Inferred (derived, arithmetic shown), Hypothesis (to be validated), Unknown. "§N" points to `ARQUITETURA.md`, the Portuguese working journal kept outside this repository. "docs/0N" points to `docs/` in this repository. "10k report" is `reports/Arquitetura para 10 mil usuários.md`, also outside this repository. Raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive. Every price carries the date it was read; a GPU price older than a few days is stale (docs/05).
 
 ## When to use
 
@@ -25,7 +25,7 @@ Evidence labels: Observed (we measured it, path or section given), Reported (a n
 | Product: unlimited tokens at a fixed cost per user | The product sells what the API does not: no token limit and a known monthly cost. This replaced cost per token as the decision criterion | Paulo's decision, §19; docs/01 |
 | We do not try to beat the API on cost per token | At the modeled demand the API is cheaper: the fleet costs about 3 times the API at 10,000 users and 5 to 6 times at 1,000 | Inferred, §18.2, 10k report Table 1 |
 | Primary metric: agent sessions inside the SLO per US$/h of one replica | It measures what the product pays for (users served within the SLO per dollar). HBM capacity alone ignores speed | Decision of 2026-11-11, §26.4, §27.4; docs/01 |
-| SLO per replica: zero turn errors, TTFT p95 <= 5 s on cached steady-state turns, per-stream decode p50 >= 30 tok/s | These are the thresholds `f3/sglang/resumir.py` applies; 30 tok/s is the llm-d floor for agentic GLM | Hypothesis adopted for the MVP, §20; code in `resumir.py` (Observed) |
+| SLO per replica: zero turn errors, TTFT p95 <= 5 s on cached steady-state turns, per-stream decode p50 >= 30 tok/s | These are the thresholds `bench/summarize.py` applies; 30 tok/s is the llm-d floor for agentic GLM | Hypothesis adopted for the MVP, §20; code in `summarize.py` (Observed) |
 | Capacity per replica counts only under the two-run rule | DCP4 passed 16 agents once and failed the repeat (TTFT p95 5.20 s), so single runs decide nothing | Observed, §27.4, §29.6 |
 | The fleet table (§18.1) is not a sizing answer | It assumed 40 streams per replica and demand factors that §24 later corrected | docs/01, docs/05, README contradictions table |
 | Vast.ai only for measurements and on-demand bursts, never the reserved base | Same-listing hosts differed 1.4x to 5.3x in decode; instances are containers; prepaid credit is locked to one host | Observed §29.10, §28.1; Reported by Vast support 2026-11-12 |
@@ -69,7 +69,7 @@ They are different quantities. Mixing them is how the 40-per-replica figure ente
 
 | | Demand-model stream (S) | Harness agent session |
 |---|---|---|
-| What it is | One agent call in its cycle at peak; sub-agent fan-out is already inside S through f; human pauses are removed through φ | One simulated coding agent driven by `llm_decode_bench.py` from `f3/sglang/comparativo.sh` |
+| What it is | One agent call in its cycle at peak; sub-agent fan-out is already inside S through f; human pauses are removed through φ | One simulated coding agent driven by `llm_decode_bench.py` from `bench/run_benchmark.sh` |
 | Shape | From public corpora of Claude users | Think time 0 to 3 s, start context 40K to 100K tokens, tool results 1K to 6K, responses 300 to 4,000 tokens, no sub-agent fan-out, no human pauses, `--max-num-seqs 32` (Observed in `f3/resultados/vast-20261111/vllm/vast-vllm-dcp1/agentes-24.json` and `servidor.sh`) |
 | Per replica | 40 in §18.1: a computed ceiling from R1 decode and prefill constants, with no TTFT check (§17.3, §24.3) | 24 (DCP1, one run) or 8 (DCP4, one run at level 8; run 2 tested only 16 and 24 and failed 16), with the SLO checked (Observed, §29.6; raw `vast-vllm-r1/` and `vast-vllm-r1-rep2/`). Neither profile has a capacity confirmed by two runs |
 
@@ -95,10 +95,10 @@ What to quote:
 
 ### 4. Sessions per US$/h for a run or a provider
 
-Formula (what `resumir.py` does): largest agent level N where that level and every smaller level pass the SLO, divided by the hourly price of one replica (4 GPUs). For an 8-GPU machine, the replica price is half the machine price.
+Formula (what `summarize.py` does): largest agent level N where that level and every smaller level pass the SLO, divided by the hourly price of one replica (4 GPUs). For an 8-GPU machine, the replica price is half the machine price.
 
 ```
-python3 f3/sglang/resumir.py --preco <US$ per replica-hour> <result dirs>
+python3 bench/summarize.py --price <US$ per replica-hour> <result dirs>
 ```
 
 The quality gate runs in the same command (`--needle-ref`, default `3/500`); a run that fails it does not count.
@@ -164,7 +164,7 @@ Self-hosting wins on cost only with GPUs 33 to 43% cheaper, very good caching, u
 ### 7. Qualify a host before measuring, reserving or adding it
 
 1. Start the server with the production image, checkpoint and flags.
-2. Record driver version, `nvidia-smi topo -m` and `nvidia-smi topo -p2p r`, and check the server log for `Using B12X PCIe all-reduce` (`f3/sglang/vast/preparar.sh` and `comparativo.sh` record the host; the log line is in `f3/resultados/vast-20261111/vllm/vast-vllm-r1/servidor.log`).
+2. Record driver version, `nvidia-smi topo -m` and `nvidia-smi topo -p2p r`, and check the server log for `Using B12X PCIe all-reduce` (`bench/vast/prepare_host.sh` and `run_benchmark.sh` record the host; the log line is in `f3/resultados/vast-20261111/vllm/vast-vllm-r1/servidor.log`).
 3. Run a C32 decode test with the harness about 5 minutes after the server is up.
 4. Discard the host if aggregate C32 decode with the DCP1 profile is below 1,400 tok/s (DCP4 gives 1,279 to 1,288 on a good host, so do not apply the threshold to it).
 
@@ -245,7 +245,7 @@ At the 2026-11-04 price one replica costs about 2.3 times Nebius list (16.57 / 7
 ## Sources
 
 - `docs/README.md` (contradictions table), `docs/01-product-demand-and-slo.md`, `docs/05-capacity-cost-and-providers.md`, `docs/06-aws-implementation-plan.md`.
-- `/home/paulo/Projetos/infer/ARQUITETURA.md` §8.3, §12, §17.3, §18, §19, §20, §24, §25, §29.6, §29.10.
-- `/home/paulo/Projetos/infer/NOTAS.md` (AWS prices and quota of 2026-11-04, Nebius quotas, teardown of 2026-11-06).
-- `/home/paulo/Projetos/infer/reports/Arquitetura para 10 mil usuários.md` (Tables 1 to 5, §1 to §4).
-- Code: `/home/paulo/Projetos/infer/f3/sglang/resumir.py` (`--preco`, `--needle-ref`), `comparativo.sh`, `vast/preparar.sh`.
+- `ARQUITETURA.md` §8.3, §12, §17.3, §18, §19, §20, §24, §25, §29.6, §29.10.
+- `NOTAS.md`, outside this repository (AWS prices and quota of 2026-11-04, Nebius quotas, teardown of 2026-11-06).
+- `reports/Arquitetura para 10 mil usuários.md` (Tables 1 to 5, §1 to §4).
+- Code: `bench/summarize.py` (`--price`, `--needle-ref`), `bench/run_benchmark.sh`, `bench/vast/prepare_host.sh`.

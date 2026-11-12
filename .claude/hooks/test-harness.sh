@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # PostToolUse(Edit|Write|MultiEdit): when a Python file of the harness changes, run its tests.
-# Why: resumir.py decides pass/fail for the quality gate and the SLO; a silent bug there changes decisions.
+# Why: bench/summarize.py decides pass/fail for the quality gate and the SLO; a silent bug there changes decisions.
 set -uo pipefail
 path=$(python3 -c 'import json,sys; d=json.load(sys.stdin).get("tool_input",{}); print(d.get("file_path",""))')
 [[ "$path" == *.py ]] || exit 0

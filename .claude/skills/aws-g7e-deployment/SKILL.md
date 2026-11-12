@@ -7,7 +7,7 @@ description: Use when planning, writing infrastructure code for, launching, qual
 
 How to bring the measured replica (4x RTX PRO 6000 Server Edition, local-inference-lab vLLM fork, TP4 + MTP3) up on AWS G7e, in phases, without paying for anything that has not earned it. Nothing has run on AWS yet. Price, quota, driver behaviour and GPU peer-to-peer on G7e are either stale or Unknown.
 
-Evidence labels: Observed (we measured or read it, source given), Reported (a named source says it), Inferred (derived, reasoning shown), Hypothesis, Unknown. "§N" points to `/home/paulo/Projetos/infer/ARQUITETURA.md`; "docs/0N" to `docs/` in this repository. The harness and raw results live in `/home/paulo/Projetos/infer/f3/` and are cited as `f3/...`. Prices carry the date they were read.
+Evidence labels: Observed (we measured or read it, source given), Reported (a named source says it), Inferred (derived, reasoning shown), Hypothesis, Unknown. "§N" points to `ARQUITETURA.md`, the Portuguese working journal kept outside this repository; "docs/0N" to `docs/` in this repository. The harness is in `bench/` of this repository; raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive. Prices carry the date they were read.
 
 ## When to use
 
@@ -79,24 +79,24 @@ Goal: show the AWS host behaves like Vast host 157204 and not like host 48294.
 2. Check the G and VT on-demand quota in the chosen region covers 96 vCPUs. If not, the request is the blocker; record its date and lead time.
 3. Launch one `g7e.24xlarge` with the fork image and the pinned checkpoint revision above. Tag it (see Invariants).
 4. Qualify the host (next section). If C32 decode is below 1,400 tok/s, stop and find the cause before buying anything else.
-5. Run the harness in `f3/sglang/`. On the host: `MOTOR=vllm IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 SERVIDOR=servidor-vllm-dcp1.sh EXECUCAO=docker bash comparativo.sh`; inside the container use `SERVIDOR=servidor-vllm-dcp1-direto.sh EXECUCAO=direto` (`MOTOR`, `IMAGE` and `SERVIDOR` are required; the script exits without them). Record start-to-first-request time and weight-load time; `comparativo.sh` writes `tempo-pronto.txt`.
-6. Summarize with `python3 f3/sglang/resumir.py --preco 16.57 <result dir>` (use the price read that day).
+5. Run the harness in `bench/`. On the host: `ENGINE=vllm IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 SERVER_SCRIPT=server-vllm-dcp1.sh LAUNCH_MODE=docker bash run_benchmark.sh`; inside the container use `SERVER_SCRIPT=server-vllm-dcp1-direct.sh LAUNCH_MODE=direct` (`ENGINE`, `IMAGE` and `SERVER_SCRIPT` are required; the script exits without them). Record start-to-first-request time and weight-load time; `run_benchmark.sh` writes `tempo-pronto.txt`.
+6. Summarize with `python3 bench/summarize.py --price 16.57 <result dir>` (use the price read that day).
 7. Destroy the instance and confirm zero instances and volumes remain.
 
 Acceptance criteria (values from host 157204 in parentheses, Observed):
 
 1. `nvidia-smi topo -p2p r` reports OK between all 4 GPUs, and the server log contains `Using B12X PCIe all-reduce`.
 2. Decode at C32 is at least 1,400 tok/s (1,580 with DCP1, 1,279 with DCP4; the threshold applies to DCP1).
-3. `resumir.py --needle-ref 3/500` marks the run `ok`: needle-checksum with 500 runs at C8 is not worse than 3/500 at p < 0.05 (0/500 and 3/120 on the two DCP1 runs).
+3. `summarize.py --needle-ref 3/500` marks the run `ok`: needle-checksum with 500 runs at C8 is not worse than 3/500 at p < 0.05 (0/500 and 3/120 on the two DCP1 runs).
 4. gsm8k scores at least 94/96 (95/96 and 96/96 on the two DCP1 runs, Observed in `gsm8k.json`).
 5. Time from instance start to first served request and weight-load time are in the result directory. No pass value; this is the baseline phase 5 must improve.
 
 ### Phase 2: choose DCP1 or DCP4
 
-On the phase 1 instance, run agent levels 16 and 24 twice with DCP1 and twice with DCP4 (`AGENTES="16:900 24:900"`; the second run of each profile with `SO_AGENTES=1` and its own `OUT` directory, because `comparativo.sh` overwrites `OUT`). `resumir.py` shows the second run's gate as "not run here"; the verdict comes from the first.
+On the phase 1 instance, run agent levels 16 and 24 twice with DCP1 and twice with DCP4 (`AGENT_LEVELS="16:900 24:900"`; the second run of each profile with `AGENTS_ONLY=1` and its own `OUT` directory, because `run_benchmark.sh` overwrites `OUT`). `summarize.py` shows the second run's gate as "not run here"; the verdict comes from the first.
 
-1. Four result directories exist, each with `agentes-16.json` and `agentes-24.json`.
-2. `resumir.py` prints the agent level inside the SLO for each (measured elsewhere: DCP1 24 in one run; DCP4 16 in run 1, failed 16 in run 2, and level 8 ran only once).
+1. Four result directories exist, each with `agents-16.json` and `agents-24.json`.
+2. `summarize.py` prints the agent level inside the SLO for each (measured elsewhere: DCP1 24 in one run; DCP4 16 in run 1, failed 16 in run 2, and level 8 ran only once).
 3. The chosen profile is the one whose lower run has more sessions inside the SLO. Write the choice and both numbers to `docs/03-serving-engine-and-benchmarks.md`.
 
 Why two runs: DCP4 passed 16 agents once and failed the repeat (§29.6).
@@ -113,9 +113,9 @@ A `g7e.48xlarge` needs 192 vCPUs of quota (Inferred from its vCPU count).
 
 ### Phase 4: KV tier
 
-The corrected LMCache test (`roteiro.sh` arms `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-controle`): DCP1, KV pool cut to about 3.5M tokens, 48 agents thinking 60 to 100 s between turns, LMCache L1 in host RAM against HBM only.
+The corrected LMCache test (`vast.sh` arms `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-control`): DCP1, KV pool cut to about 3.5M tokens, 48 agents thinking 60 to 100 s between turns, LMCache L1 in host RAM against HBM only.
 
-1. Both arms produce `agentes-48.json` (the bench does not save an interrupted level).
+1. Both arms produce `agents-48.json` (the bench does not save an interrupted level).
 2. Per arm: prefix-cache hit rate, LMCache hit rate, TTFT p95 of cached turns, and restores that waited for GPU capacity (log lines `waiting for GPU capacity`).
 3. The server log shows how many agents ran at once. Above about 24, the test repeated the overload of §29.8 and its TTFT result is not used.
 
@@ -127,17 +127,17 @@ To be specified after phases 1 to 4 pass (docs/06): EKS or not, autoscaling on q
 
 ### What to verify first on any new instance
 
-Run these before any measurement; they are the host qualification rule (docs/05, CLAUDE.md rule 4). `f3/sglang/vast/preparar.sh` and `comparativo.sh` already record most of them.
+Run these before any measurement; they are the host qualification rule (docs/05, CLAUDE.md rule 4). `bench/vast/prepare_host.sh` and `run_benchmark.sh` already record most of them.
 
 | Check | How | Pass | Why |
 |---|---|---|---|
 | Driver | `nvidia-smi` (record the version) | Recorded. The image expects 615.65.02 or newer (§25.1). Which driver the G7e AMI ships is Unknown | 157204 ran 615.71.09 and was fast; Nebius ran 580.173 and worked (1,425 tok/s at C32); slow host 48294 ran 580.95.05. The driver alone did not explain the slow host (Inferred, §29.10) |
-| Topology | `nvidia-smi topo -m`; PCIe gen and width via `nvidia-smi --query-gpu=...` as in `comparativo.sh` | Recorded; links at Gen5 x16 on the good host | 48294 matched 157204 here and was still slow, so topology is necessary evidence, not sufficient |
+| Topology | `nvidia-smi topo -m`; PCIe gen and width via `nvidia-smi --query-gpu=...` as in `run_benchmark.sh` | Recorded; links at Gen5 x16 on the good host | 48294 matched 157204 here and was still slow, so topology is necessary evidence, not sufficient |
 | GPU peer-to-peer | `nvidia-smi topo -p2p r` | OK between all 4 GPUs | B12X PCIe all-reduce needs P2P. Without the driver P2P override, the custom all-reduce lost to NCCL from 4 KiB; with it, it was 5.7 times faster at 32 KiB (Observed, §25.2). P2P on G7e is Unknown |
-| All-reduce microbenchmark | `llm_decode_bench.py --p2pmark-only --p2pmark-max-gpus 4 --p2pmark-mode allreduce` (in `preparar.sh`) | Recorded | Small all-reduce took 9.1 to 9.5 µs on 157204 against 32.1 to 57.4 µs on Nebius R1, where the override was not in effect (§28.2) |
+| All-reduce microbenchmark | `llm_decode_bench.py --p2pmark-only --p2pmark-max-gpus 4 --p2pmark-mode allreduce` (in `prepare_host.sh`) | Recorded | Small all-reduce took 9.1 to 9.5 µs on 157204 against 32.1 to 57.4 µs on Nebius R1, where the override was not in effect (§28.2) |
 | All-reduce log line | server log contains `Using B12X PCIe all-reduce` | Present | The fork does not check driver state or compare against NCCL at startup, so the log line is the only confirmation the path was chosen (§23.4) |
 | C32 decode | harness, about 5 min after the server is up | At least 1,400 tok/s aggregate, with the DCP1 profile | Good hosts gave 1,423 to 1,580 with DCP1 (DCP4 gave 1,279 to 1,288 on the same good host); 48294 gave 296 (§12.2, §29.6, §29.10) |
-| Quality gate | `resumir.py --needle-ref 3/500`; gsm8k | `ok`; gsm8k at least 94/96 | Quality should not depend on the host with the same software (Inferred), but a run only counts after the gate |
+| Quality gate | `summarize.py --needle-ref 3/500`; gsm8k | `ok`; gsm8k at least 94/96 | Quality should not depend on the host with the same software (Inferred), but a run only counts after the gate |
 
 If P2P is not OK, do not apply the Nebius driver fix blindly. On Nebius the driver already ships `RegistryDwords="PeerMappingOverride=1;"`; a second `options nvidia NVreg_RegistryDwords=` file can override it, so a new override must include the original value and live in a `zz-*.conf` file, and `nv-hostengine` and `nvidia-persistenced` must be stopped before reloading the driver (§25.3). Whether any of this applies on the AWS AMI is Unknown.
 
@@ -202,7 +202,7 @@ How to apply it on AWS:
 ## Sources
 
 - `docs/06-aws-implementation-plan.md` (phases, criteria, decisions), `docs/05-capacity-cost-and-providers.md` (AWS section, host qualification, lessons), `docs/README.md`, `docs/01-product-demand-and-slo.md`.
-- `/home/paulo/Projetos/infer/NOTAS.md`: AWS G7e prices, zones, EFA interface counts and quotas read on 2026-11-04; Nebius token handling.
-- `/home/paulo/Projetos/infer/ARQUITETURA.md` §6, §9.3, §12.1, §12.2, §17.2, §18.3, §23.4, §25.1 to §25.3, §28.2, §29.1, §29.6, §29.10.
-- `/home/paulo/Projetos/infer/reports/Arquitetura para 10 mil usuários.md` §3 Table 5, §4, §9.
-- Code: `/home/paulo/Projetos/infer/f3/sglang/comparativo.sh`, `resumir.py`, `vast/preparar.sh`, `vast/roteiro.sh`; log line evidence in `f3/resultados/vast-20261111/vllm/vast-vllm-r1/servidor.log`.
+- `NOTAS.md` (working notes, outside this repository): AWS G7e prices, zones, EFA interface counts and quotas read on 2026-11-04; Nebius token handling.
+- `ARQUITETURA.md` §6, §9.3, §12.1, §12.2, §17.2, §18.3, §23.4, §25.1 to §25.3, §28.2, §29.1, §29.6, §29.10.
+- `reports/Arquitetura para 10 mil usuários.md` (outside this repository) §3 Table 5, §4, §9.
+- Code: `bench/run_benchmark.sh`, `bench/summarize.py`, `bench/vast/prepare_host.sh`, `bench/vast/vast.sh`; log line evidence in `f3/resultados/vast-20261111/vllm/vast-vllm-r1/servidor.log`.

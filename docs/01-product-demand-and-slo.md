@@ -7,7 +7,7 @@ developers who run coding agents, on NVIDIA RTX PRO 6000 Blackwell GPUs, with th
 
 Sources are `ARQUITETURA.md` (cited by section, e.g. §18.1), `reports/Arquitetura para 10 mil
 usuários.md` (cited as "the 10k report"), the notes in `research_notes/Arquitetura para 10 mil
-usuários/`, `f3/sglang/resumir.py`, and result files under `f3/resultados/`. All sources are in
+usuários/`, `bench/summarize.py`, and result files in the results archive: `f3/resultados/`. All sources are in
 Brazilian Portuguese; figures are copied from them, not recomputed, unless a line says Inferred and
 shows the arithmetic.
 
@@ -23,7 +23,7 @@ Evidence labels: **Observed** (we measured it), **Reported** (a named source say
   served tokens are input and 96% of turns reuse 90% or more of the prefix (Reported, llm-d
   GLM-5.2 blog, §8.1). Sub-agents arrive in correlated bursts (median group of 16 requests, p90
   47, p99 175 in the Weka corpus, Observed in our analysis, §24.1).
-- SLO per replica (`f3/sglang/resumir.py`, §20, §26.4): zero turn errors, TTFT p95 <= 5 s on
+- SLO per replica (`bench/summarize.py`, §20, §26.4): zero turn errors, TTFT p95 <= 5 s on
   cached turns in steady state, per-stream decode p50 >= 30 tok/s. The targets are Hypothesis
   (§20); they are what we measure against.
 - Primary metric (§26.4, §27.4): agent sessions inside the SLO per US$/h of a replica. An
@@ -89,7 +89,7 @@ HBM); burst tests need 51 requests sharing a prefix.
 ### Shape measured on the Weka corpus (§24)
 
 Source: `semianalysisai/cc-traces-weka-062126` (393 sessions, 98,827 requests), processed by
-`f3/p0/analisar_weka.py`, output in `f3/p0/weka-resultado.json`. Mean input (218,921.8), mean output
+`f3/p0/analisar_weka.py`, output in `f3/p0/weka-resultado.json` (both in the working tree, not in this repository). Mean input (218,921.8), mean output
 (1,077.4) and request counts match the dataset README exactly (Observed, §24).
 
 | Parameter | Earlier assumption | Weka value |
@@ -246,12 +246,12 @@ Kept as context; §19 removed it as the decision criterion.
 
 ### SLO definition
 
-Per agent level, a replica passes when all three hold (`f3/sglang/resumir.py` docstring and `Slo`
+Per agent level, a replica passes when all three hold (`bench/summarize.py` docstring and `Slo`
 dataclass, Observed in code; targets from §20, labelled Hypothesis there):
 
 | Criterion | Threshold | Notes |
 |---|---|---|
-| Turn errors | zero | from `resumir.py`; §20 itself defines availability failure as 5xx above 1% in 5 min |
+| Turn errors | zero | from `summarize.py`; §20 itself defines availability failure as 5xx above 1% in 5 min |
 | TTFT p95, cached turns | <= 5 s | turns >= 1 sent after the last agent finished turn 0; at least 20 such turns per level (§29.3) |
 | Decode speed p50 per stream | >= 30 tok/s | output tokens after the first, per second; the llm-d floor for agentic GLM (§20) |
 
@@ -270,13 +270,13 @@ The SLO targets become requirements only after measurement (EK1 to EK9, §20).
 An arm only counts if it passes the quality gate. The original gate (§27.4) was 120/120 on
 `needle-checksum` and no more than 2 points below R1 vLLM on gsm8k. §29.5 replaced the needle part
 (decided 2026-11-12): 500 runs at 8 concurrent, compared with the vLLM DCP4 reference (3 errors in 500)
-by a one-sided Fisher exact test; fail if worse than the reference with p < 0.05. `resumir.py`
+by a one-sided Fisher exact test; fail if worse than the reference with p < 0.05. `summarize.py`
 implements this (`--needle-ref`, default `3/500`). DCP1 passes it: 3 errors in 620 at 8 concurrent
 over two runs (§29.10, Observed).
 
 ### Primary metric
 
-**Agent sessions inside the SLO per US$/h of a replica** (§26.4, §27.4). `resumir.py` computes it as
+**Agent sessions inside the SLO per US$/h of a replica** (§26.4, §27.4). `summarize.py` computes it as
 the largest agent count N where that level and all smaller levels pass, divided by the hourly price
 of the replica on the machine where it ran.
 
@@ -362,7 +362,7 @@ from 1 to 2 VMs.
 - **Definition of "user"** (registered, MAU, DAU or seat) and of a looping session (§18.7).
 - **SLO by context range.** §18.7 asks for TTFT p95 per context range and TPOT p50 and p90; only the
   cached-turn and cold-256K TTFT rows exist (§20). §20 scopes the 5 s target to cached turns with up
-  to 8K new tokens, while `resumir.py` applies it to all steady-state cached turns.
+  to 8K new tokens, while `summarize.py` applies it to all steady-state cached turns.
 - **Provider price.** The metric depends on the replica price. Nebius list is US$ 1.80 per GPU-hour,
   an aggregator lists US$ 2.35 for the same VM, and which applies is Unknown (10k report §3).
 - **KV tier under normal load.** The LMCache test with DCP1, normal KV, 24 active agents and idle

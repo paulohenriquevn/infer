@@ -1,6 +1,6 @@
 # GLM-5.3-Flash serving for coding agents
 
-This folder is the consolidated state of the project: serving the GLM-5.3-Flash model to about 10,000 developers who use coding agents, on NVIDIA RTX PRO 6000 Blackwell GPUs. It is written for the people and the coding agents who will build the system on AWS. Everything here was distilled on 2026-11-12 from the working journal `ARQUITETURA.md` (Portuguese, chronological), the notes in `NOTAS.md`, the reports in `reports/` and the raw results in `f3/resultados/`.
+This folder is the consolidated state of the project: serving the GLM-5.3-Flash model to about 10,000 developers who use coding agents, on NVIDIA RTX PRO 6000 Blackwell GPUs. It is written for the people and the coding agents who will build the system on AWS. Everything here was distilled on 2026-11-12 from the working journal `ARQUITETURA.md` (Portuguese, chronological), the notes in `NOTAS.md`, the reports in `reports/` and the raw results in the results archive: `f3/resultados/`.
 
 ## Where things stand
 
@@ -8,7 +8,7 @@ This folder is the consolidated state of the project: serving the GLM-5.3-Flash 
 |---|---|---|
 | Serving engine | Decided: the local-inference-lab fork of vLLM with the QAD NVFP4 checkpoint, 4 GPUs per replica, TP4 + MTP3. SGLang measured and rejected | `03-serving-engine-and-benchmarks.md` |
 | Replica profile | Open: DCP1 (24 agents inside the SLO, one run) or DCP4 (16 agents, not reproduced) | `03-serving-engine-and-benchmarks.md` |
-| Quality gate | Decided: needle-checksum, 500 runs, one-sided Fisher test against 3/500, implemented in `f3/sglang/resumir.py` | `03-serving-engine-and-benchmarks.md` |
+| Quality gate | Decided: needle-checksum, 500 runs, one-sided Fisher test against 3/500, implemented in `bench/summarize.py` | `03-serving-engine-and-benchmarks.md` |
 | KV tiers | LMCache RAM tier restores sessions but does not raise concurrent capacity; corrected test not run | `04-kv-cache-routing-and-disaggregation.md` |
 | Router | llm-d EPP with prefix affinity, validated only on a small test model | `04-kv-cache-routing-and-disaggregation.md` |
 | P/D disaggregation | Not in the first design | `04-kv-cache-routing-and-disaggregation.md` |
@@ -34,17 +34,18 @@ Every important claim carries an evidence label:
 - Hypothesis: to be validated.
 - Unknown: nobody has the answer yet.
 
-Section references such as "§29.6" point to `ARQUITETURA.md`. Most numbers come from single runs; the documents say so where it matters. Prices carry the date they were read.
+Section references such as "§29.6" point to `ARQUITETURA.md`, the Portuguese working journal, and paths such as `f3/resultados/...` point to raw results. Both are in the release `evidence-2026-11-12` (https://github.com/paulohenriquevn/infer/releases/tag/evidence-2026-11-12); `scripts/fetch_evidence.sh` downloads them, checks the checksums and places them at the repository root. Most numbers come from single runs; the documents say so where it matters. Prices carry the date they were read.
 
 ## Repository layout
 
 | Path | Contents |
 |---|---|
-| `f3/sglang/` | The benchmark harness used for the engine comparison: `comparativo.sh` (gate, speed, agent levels), server launch scripts, `resumir.py` (SLO and quality verdicts, with tests) |
-| `f3/sglang/vast/` | `roteiro.sh` and `preparar.sh`: rent, prepare, run, fetch and destroy Vast.ai instances |
-| `f3/llm-inference-bench/` | `llm_decode_bench.py` from local-inference-lab with our exact-history patch |
-| `f3/resultados/` | Raw results, one directory per run |
-| `f3/rtx/`, `f3/b300/`, `f3/terraform/` | Terraform used on Nebius |
+| `bench/` | The benchmark harness used for the engine comparison: `run_benchmark.sh` (gate, speed, agent levels), server launch scripts, `summarize.py` (SLO and quality verdicts, with tests), `setup_bench.sh`. See `bench/README.md` |
+| `bench/vast/` | `vast.sh` and `prepare_host.sh`: rent, prepare, run, fetch and destroy Vast.ai instances |
+| `bench/llm-inference-bench/` | `llm_decode_bench.py` from local-inference-lab with our exact-history patch, cloned by `bench/setup_bench.sh` (not versioned) |
+| `router/` | llm-d routing experiments on the mini model: Helm values, A/B, session client, P/D manifests and load |
+| results archive: `f3/resultados/` | Raw results, one directory per run, published separately from this repository |
+| `f3/rtx/`, `f3/b300/`, `f3/terraform/` | Terraform used on Nebius (working tree, not in this repository) |
 | `reports/`, `research_notes/` | Research reports and their source notes (Portuguese) |
 
 ## Contradictions found while consolidating
@@ -67,7 +68,7 @@ The journal grew over two weeks and some early numbers were superseded without b
 | Image driver | "tests driver 615.71.09" (§10.4) | expects 615.65.02 or newer (§25.1) |
 | Fork lag behind upstream vLLM | 3,304 (§13.3), 3,222 (§22.1), 2,439 (§26.5) commits | Different reference branches and dates; recount before relying on it |
 | b12x repository | active (§13.3) | archived, moved into FlashInfer (§22.1) |
-| TTFT target scope | 5 s for turns with up to 8K new tokens (§20) | `resumir.py` applies 5 s to every cached turn |
+| TTFT target scope | 5 s for turns with up to 8K new tokens (§20) | `summarize.py` applies 5 s to every cached turn |
 | SGLang decision reason "llm-d reads vLLM KV events" (§29.7) | | Corrected on 2026-11-12: only the approximate router mode, which ignores events, was tested |
 
 Further per-topic inconsistencies are listed at the end of `04-kv-cache-routing-and-disaggregation.md`.

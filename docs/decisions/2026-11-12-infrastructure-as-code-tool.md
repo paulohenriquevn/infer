@@ -10,7 +10,7 @@ Date: 2026-11-12. Status: decided.
 
 | Option | For | Against |
 |---|---|---|
-| Terraform | The Nebius environments of this project are already Terraform (`f3/rtx/`, `f3/b300/`, `f3/terraform/`, Observed). One language for every provider we priced (Nebius and AWS have providers; Vast.ai has none in either tool). The same team's other AWS repositories use Terraform (Reported by the project owner) | State has to be stored and locked (an S3 backend) |
+| Terraform | The Nebius environments of this project are already Terraform (`f3/rtx/`, `f3/b300/`, `f3/terraform/` in the working tree, not in this repository, Observed). One language for every provider we priced (Nebius and AWS have providers; Vast.ai has none in either tool). The same team's other AWS repositories use Terraform (Reported by the project owner) | State has to be stored and locked (an S3 backend) |
 | AWS CDK | Higher-level constructs, CloudFormation handles state | AWS only, so Nebius would stay in a second tool; no CDK code exists in the project |
 
 ## Decision

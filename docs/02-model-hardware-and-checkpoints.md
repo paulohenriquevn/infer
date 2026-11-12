@@ -215,7 +215,7 @@ All runs below use the `llm-inference-bench` harness (`llm_decode_bench.py` 0.8.
 
 ### 4.1 R1: 4 RTX PRO 6000 Server Edition, fork, QAD, TP4 + DCP4 + MTP3
 
-Host: Nebius `gpu-rtx6000-a` 8-GPU VM, on demand at US$ 14.40/h, GPUs 0 to 3, NRD disk of 1,767 GiB, command printed by the image (`print-command-glm53-tp4-dcp4-mtp3.sh`) with `NCCL_NET_PLUGIN=none` and `HF_HUB_OFFLINE=1`. Date 2026-11-05. Driver P2P override **not** active. Results in `f3/resultados/rtx-20261105/`. Observed (§12.2).
+Host: Nebius `gpu-rtx6000-a` 8-GPU VM, on demand at US$ 14.40/h, GPUs 0 to 3, NRD disk of 1,767 GiB, command printed by the image (`print-command-glm53-tp4-dcp4-mtp3.sh`) with `NCCL_NET_PLUGIN=none` and `HF_HUB_OFFLINE=1`. Date 2026-11-05. Driver P2P override **not** active. Results in the results archive: `f3/resultados/rtx-20261105/`. Observed (§12.2).
 
 | Item | Value |
 |---|---|

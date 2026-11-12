@@ -10,7 +10,7 @@ This skill covers how one replica (4x RTX PRO 6000 Server Edition, local-inferen
 Conventions:
 
 - Section references such as §12.2 point to `ARQUITETURA.md` (Portuguese journal). Later sections and notes marked "Correção posterior" replace earlier text.
-- `ARQUITETURA.md` and every harness path written as `f3/...` currently live in `/home/paulo/Projetos/infer`, outside this repository.
+- `ARQUITETURA.md` lives outside this repository. Harness paths (`bench/`, `router/`) are relative to the root of this repository; raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive.
 - Evidence labels: Observed (we measured it), Reported (a named source says it), Inferred (derived, link stated), Hypothesis (to validate), Unknown.
 - "Mini" means the `glm5next` mini test model: random weights, 2 full attention layers, 1 GPU per replica, upstream vLLM 0.32.0. Mini results transfer as mechanisms, never as numbers. Every row without the word "mini" is the real model.
 - Most numbers come from one run per cell, without confidence intervals.
@@ -18,7 +18,7 @@ Conventions:
 ## When to use
 
 - You are about to change `--prefill-compute-share`, `--max-parallel-prefills`, `--prefill-schedule-interval`, `--max-num-batched-tokens`, `--max-num-seqs` or `num_speculative_tokens`.
-- TTFT p95 of cached turns goes above 5 s, or per-stream decode p50 drops below 30 tok/s (the SLO checked by `f3/sglang/resumir.py`).
+- TTFT p95 of cached turns goes above 5 s, or per-stream decode p50 drops below 30 tok/s (the SLO checked by `bench/summarize.py`).
 - You need sessions per replica from measured rates (capacity planning, fleet size).
 - Many long sessions start at once: start of the workday, a replica restart, a cell failover.
 - Someone proposes P/D disaggregation, NIXL KV transfer, or separate GPU types for prefill and decode, including on AWS with EFA.
@@ -53,7 +53,7 @@ Decode flatness was measured up to 128K only. Beyond 128K it is Unknown.
 
 ### 2. Keep the fork's prefill share and single prefill lane; accept slow cold prompts to protect decode
 
-The running profile sets `--prefill-compute-share 0.4`, `--max-parallel-prefills 1` and `--prefill-schedule-interval 1` (Observed in `f3/sglang/servidor-vllm-dcp1-direto.sh`, the script that reproduces the production profile per `docs/03-serving-engine-and-benchmarks.md`). These flags do not exist in upstream vLLM 0.32.0 (Observed: 0 hits in `vllm/config/scheduler.py`, §10.3).
+The running profile sets `--prefill-compute-share 0.4`, `--max-parallel-prefills 1` and `--prefill-schedule-interval 1` (Observed in `bench/server-vllm-dcp1-direct.sh`, the script that reproduces the production profile per `docs/03-serving-engine-and-benchmarks.md`). These flags do not exist in upstream vLLM 0.32.0 (Observed: 0 hits in `vllm/config/scheduler.py`, §10.3).
 
 What they do, measured on R1 (Observed, §12.2):
 
@@ -69,7 +69,7 @@ The meaning of `--prefill-schedule-interval` is not documented in the sources (U
 
 ### 3. `--max-num-batched-tokens` is 4096; lowering it is the first lever against an ITL tail, before P/D
 
-- Our profile runs `--max-num-batched-tokens 4096` with `--enable-chunked-prefill` (Observed in `f3/sglang/servidor-vllm-dcp1-direto.sh`). The community uses 4096, and 3072 on the 2-GPU preset (Reported, rtx6kpro, §10.3).
+- Our profile runs `--max-num-batched-tokens 4096` with `--enable-chunked-prefill` (Observed in `bench/server-vllm-dcp1-direct.sh`). The community uses 4096, and 3072 on the 2-GPU preset (Reported, rtx6kpro, §10.3).
 - On one B300 with upstream vLLM, adding MTP3 and a 4096 batch cut the 8 x 128K interference about 4.5 times (247 to about 55 ms per token), raised TTFT p50 from 19.1 to 24.5 s, and cost about 22% of cold prefill rate (Observed, §12.3). Two things changed at once, so the share due to the batch limit is Unknown.
 - If long sub-agent prefills cause an ITL tail, try a smaller `--max-num-batched-tokens` and prefill chunk before P/D (Hypothesis, `docs/04-kv-cache-routing-and-disaggregation.md` §5.2). How it interacts with the fork's prefill share was never measured (Unknown).
 
@@ -88,7 +88,7 @@ Why it drives p95 (Inferred): these tokens go through the single prefill lane at
 
 What the sources say causes it: vLLM keeps recurrent KDA state only at block boundaries (`align` mode), so each turn recomputes the end of the previous one (§26.2, §26.5). Our profile runs `--mamba-cache-mode align` and `--block-size 256` (Observed in the script). SGLang's default hybrid mode has the same limit (Observed in code, §27.1).
 
-A caveat the sources do not state (Inferred, by us): the metric is prompt tokens minus cached tokens, and the agent scenario adds 1K to 6K tool tokens per turn (§27.3, `AGENTE_FERRAMENTA=1k-6k` in `f3/sglang/comparativo.sh`). If the bench draws that range uniformly, its median is 3.5K and its p90 5.5K, close to the observed numbers. Then most of the 3K to 6K is new input that must be prefilled anyway, and the avoidable state tail is smaller. The bench's sampling distribution was not read. §26.3 asks for exactly this measurement before any FlashState port.
+A caveat the sources do not state (Inferred, by us): the metric is prompt tokens minus cached tokens, and the agent scenario adds 1K to 6K tool tokens per turn (§27.3, `AGENT_TOOL=1k-6k` in `bench/run_benchmark.sh`). If the bench draws that range uniformly, its median is 3.5K and its p90 5.5K, close to the observed numbers. Then most of the 3K to 6K is new input that must be prefilled anyway, and the avoidable state tail is smaller. The bench's sampling distribution was not read. §26.3 asks for exactly this measurement before any FlashState port.
 
 The engine fix is FlashState (saves recurrent state at any position). Porting it to our fork means redoing about 5,000 lines in the scheduler and cache manager, the files where the fork diverges most; the effort estimate of weeks is a Hypothesis (§26.5). It is priority 4 of 4 (§26.4).
 
@@ -134,56 +134,56 @@ AWS changes one input. `g7e.8xlarge` and larger list EFA (Observed in AWS docs, 
 ### Read the scheduler profile you are actually running
 
 ```bash
-cd /home/paulo/Projetos/infer
+# from the root of this repository
 grep -o -- '--\(prefill-compute-share\|max-parallel-prefills\|prefill-schedule-interval\|max-num-batched-tokens\|max-num-seqs\|mamba-cache-mode\|block-size\|decode-context-parallel-size\) [^ ]*' \
-  f3/sglang/servidor-vllm-dcp1-direto.sh
-grep -o -- '--speculative-config [^ ]*' f3/sglang/servidor-vllm-dcp1-direto.sh
+  bench/server-vllm-dcp1-direct.sh
+grep -o -- '--speculative-config [^ ]*' bench/server-vllm-dcp1-direct.sh
 ```
 
-After a run, confirm against the server log, because the launcher can apply its own profile (`servidor.log` in the result directory, which `comparativo.sh` writes):
+After a run, confirm against the server log, because the launcher can apply its own profile (`server.log` in the result directory, which `run_benchmark.sh` writes; `servidor.log` in directories written before the translation):
 
 ```bash
-grep -n 'max_num_batched_tokens\|num_speculative_tokens' <result_dir>/servidor.log | head
+grep -n 'max_num_batched_tokens\|num_speculative_tokens' <result_dir>/server.log | head
 ```
 
 The image can print its full launch command with `--print-command`, except in `CACHE_MODE=lmcache`, which it refuses because it starts a second process (Observed, §29.8, doc 03 §3). The exact invocation used for R1 lived in a script named `print-command-glm53-tp4-dcp4-mtp3.sh` (§12.2), kept at `f3/resultados/rtx-20261105/print-command-glm53-tp4-dcp4-mtp3.sh`.
 
 ### Qualify the host before any tuning
 
-The same "4x RTX PRO 6000" listing delivered 5 times lower decode on one host (Observed, §29.10). Start the server, run decode at C32 for about 5 minutes, and discard the host below 1,400 tok/s with the DCP1 profile (`servidor-vllm-dcp1*.sh`); DCP4 gave 1,279 to 1,288 on the same good host, so the threshold applies to DCP1 only (host 157204 gave 1,580 with DCP1). The threshold comes from two hosts only. `comparativo.sh` records `nvidia-smi`, driver, PCIe link and topology in `host.txt`.
+The same "4x RTX PRO 6000" listing delivered 5 times lower decode on one host (Observed, §29.10). Start the server, run decode at C32 for about 5 minutes, and discard the host below 1,400 tok/s with the DCP1 profile (`server-vllm-dcp1*.sh`); DCP4 gave 1,279 to 1,288 on the same good host, so the threshold applies to DCP1 only (host 157204 gave 1,580 with DCP1). The threshold comes from two hosts only. `run_benchmark.sh` records `nvidia-smi`, driver, PCIe link and topology in `host.txt`.
 
 ### Measure the cost profile (decode by concurrency, cold prefill by length)
 
-`f3/sglang/comparativo.sh` runs these after the quality gate (same parameters as R1):
+`bench/run_benchmark.sh` runs these after the quality gate (same parameters as R1):
 
 ```bash
 $PY $BENCH --port 8000 --concurrency 1,8,16,32 --contexts 0 --duration 30 --max-tokens 8192 --skip-prefill --output decode.json
 $PY $BENCH --port 8000 --prefill-only --standalone-prefill --prefill-contexts 8k,32k,128k,256k --output prefill.json
 ```
 
-`$BENCH` is `f3/llm-inference-bench/llm_decode_bench.py` with our `bench-exact-history-sglang.patch` applied; `comparativo.sh` refuses to run without it.
+`$BENCH` is `bench/llm-inference-bench/llm_decode_bench.py` with our `bench-exact-history-sglang.patch` applied; `run_benchmark.sh` refuses to run without it.
 
-The mixed prefill-under-decode numbers of R1 (4.1k tok/s, 8 x 128K) came from our `pd_bench` (§12.2), at `f3/llmd/pd/pd_bench.py`. With MTP, `pd_bench` counts streaming chunks of about 2.6 tokens, so divide its per-step figures by 2.6 to get per-token figures (Observed, §12.2).
+The mixed prefill-under-decode numbers of R1 (4.1k tok/s, 8 x 128K) came from our `pd_bench` (§12.2), at `router/pd/pd_bench.py`. With MTP, `pd_bench` counts streaming chunks of about 2.6 tokens, so divide its per-step figures by 2.6 to get per-token figures (Observed, §12.2).
 
 ### Test a flag change
 
-1. Copy the server script and change one flag in the copy. `comparativo.sh` copies `SERVIDOR` into the result directory as `servidor.sh`, so every run records its exact flags.
+1. Copy the server script and change one flag in the copy. `run_benchmark.sh` copies `SERVER_SCRIPT` into the result directory as `server.sh`, so every run records its exact flags.
 2. Run the quality gate and agent levels 16 and 24, twice. On AWS (phase 2 of `docs/06-aws-implementation-plan.md`), inside the fork container:
 
 ```bash
-cd f3/sglang
-MOTOR=vllm EXECUCAO=direto IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
-  SERVIDOR=<your-copy>.sh NEEDLE_RUNS=500 AGENTES="16:900 24:900" bash comparativo.sh
-# second run of the same server: skip gate and speed, and write to a NEW directory (comparativo.sh overwrites OUT)
-MOTOR=vllm EXECUCAO=direto IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
-  SERVIDOR=<your-copy>.sh SO_AGENTES=1 OUT=resultados/<run2> AGENTES="16:900 24:900" bash comparativo.sh
-# resumir.py marks run2's gate as "not run here"; the gate verdict comes from run1
-python3 resumir.py --preco <US$/h> --needle-ref 3/500 resultados/<run1> resultados/<run2>
+cd bench
+ENGINE=vllm LAUNCH_MODE=direct IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
+  SERVER_SCRIPT=<your-copy>.sh NEEDLE_RUNS=500 AGENT_LEVELS="16:900 24:900" bash run_benchmark.sh
+# second run of the same server: skip gate and speed, and write to a NEW directory (run_benchmark.sh overwrites OUT)
+ENGINE=vllm LAUNCH_MODE=direct IMAGE=ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016 \
+  SERVER_SCRIPT=<your-copy>.sh AGENTS_ONLY=1 OUT=results/<run2> AGENT_LEVELS="16:900 24:900" bash run_benchmark.sh
+# summarize.py marks run2's gate as "not run here"; the gate verdict comes from run1
+python3 summarize.py --price <US$/h> --needle-ref 3/500 results/<run1> results/<run2>
 ```
 
-On Vast.ai the same arm runs through `f3/sglang/vast/roteiro.sh` (`criar`, `esperar`, `enviar`, `preparar`, `rodar`, `trazer`, `destruir`), for example `AGENTES="16:900 24:900" bash roteiro.sh rodar vllm dcp1-rep`. For the second run of the same arm add `RODADA=2 SO_AGENTES=1`; without `RODADA`, `rodar` writes to the same directory and overwrites the first run. Renting GPUs costs money; get approval first.
+On Vast.ai the same arm runs through `bench/vast/vast.sh` (`create`, `wait`, `send`, `prepare`, `run`, `fetch`, `destroy`), for example `AGENT_LEVELS="16:900 24:900" bash vast.sh run vllm dcp1-rep`. For the second run of the same arm add `RUN_SUFFIX=2 AGENTS_ONLY=1`; without `RUN_SUFFIX`, `run` writes to the same directory and overwrites the first run. Renting GPUs costs money; get approval first.
 
-3. Read `resumir.py` output per level: TTFT p95 of cached turns, per-stream decode p50, turn errors, re-prefilled tokens per turn (p50, p90) and cache share. Sessions inside the SLO is the largest level that passes with all smaller levels passing, divided by US$/h.
+3. Read `summarize.py` output per level: TTFT p95 of cached turns, per-stream decode p50, turn errors, re-prefilled tokens per turn (p50, p90) and cache share. Sessions inside the SLO is the largest level that passes with all smaller levels passing, divided by US$/h.
 4. Keep the change only if the lower of the two runs has more sessions inside the SLO and the quality gate passes.
 
 ### Estimate sessions per replica
@@ -193,7 +193,7 @@ Use the two-ceiling formula in decision 1 with P from your trace (new tokens per
 ## Invariants
 
 - `num_speculative_tokens` stays at 3 or below. Reason: above 3 the fork crashes with `illegal memory access` at high concurrency (Reported, §10.1).
-- Every change of image, checkpoint or flag passes the needle-checksum gate (500 runs at C8, one-sided Fisher test against 3/500, `resumir.py --needle-ref 3/500`) before any speed number counts. Reason: kernel-level numeric bugs have shipped in the fork before (R33 SwiGLU clamp), and the probe catches MoE activation precision changes (Reported, §10.4; rule decided in §29.5).
+- Every change of image, checkpoint or flag passes the needle-checksum gate (500 runs at C8, one-sided Fisher test against 3/500, `summarize.py --needle-ref 3/500`) before any speed number counts. Reason: kernel-level numeric bugs have shipped in the fork before (R33 SwiGLU clamp), and the probe catches MoE activation precision changes (Reported, §10.4; rule decided in §29.5).
 - Decide on two runs, never one. Reason: DCP4 passed 16 agents with 0.23 s of margin and failed the repeat at 5.20 s (Observed, §29.6).
 - Count TTFT only on cached turns sent after the last agent finished its first turn, with at least 20 such turns per level. Reason: otherwise you measure the cold first-turn queue, not steady state (§29.3).
 - Qualify the host (C32 decode at least 1,400 tok/s) before measuring anything. Reason: a 5x slower host looked identical on paper (§29.10).
@@ -206,7 +206,7 @@ Use the two-ceiling formula in decision 1 with P from your trace (new tokens per
 
 - The B300 interference test (8 x 128K, TPOT 247 ms) could not separate prefill interference from 8 long-context decodes. Design interference tests with a decode-only control of the same contexts (§9.3).
 - `pd_bench` with MTP counts chunks of about 2.6 tokens. The first R1 "TPOT" of 21 ms was per step; per token it was about 8.2 ms (§12.2).
-- The first agent levels started all agents together; the cold queue (416 s at 16 agents) failed the 8-agent level with TTFT p95 33 s. `resumir.py` now excludes those turns (§29.3).
+- The first agent levels started all agents together; the cold queue (416 s at 16 agents) failed the 8-agent level with TTFT p95 33 s. `summarize.py` now excludes those turns (§29.3).
 - `nohup ... &` inside SSH held the session until the arm finished; the harness now uses `setsid -f` (§29.3).
 - The §16.4 capacity table used only the decode ceiling and a "7,800 new tokens per turn" figure attributed to the llm-d blog, which publishes p50 632, p90 3,735 and p99 148K token growth instead (§17.2).
 - A tail latency was blamed on routing affinity before the run order was controlled; it was a cold start. Warm up and discard before every A/B, and do not run arms in a fixed order (§9.1).
@@ -233,4 +233,4 @@ Use the two-ceiling formula in decision 1 with P from your trace (new tokens per
 - `docs/01-product-demand-and-slo.md` (SLO and workload shape)
 - `docs/05-capacity-cost-and-providers.md` and `docs/06-aws-implementation-plan.md` (G7e, EFA, phase 2)
 - `ARQUITETURA.md` §3, §9.2, §9.3, §10.1, §10.3, §10.4, §12.2, §12.3, §16.4, §17.2, §17.3, §17.4, §17.5, §20, §26.2 to §26.5, §27.1, §27.3, §29.1 to §29.3, §29.6, §29.9, §29.10
-- Harness: `f3/sglang/comparativo.sh`, `f3/sglang/resumir.py`, `f3/sglang/servidor-vllm-dcp1-direto.sh`, `f3/sglang/vast/roteiro.sh`
+- Harness: `bench/run_benchmark.sh`, `bench/summarize.py`, `bench/server-vllm-dcp1-direct.sh`, `bench/vast/vast.sh`

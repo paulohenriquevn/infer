@@ -7,7 +7,7 @@ description: Use when you reason about GLM-5.3-Flash itself, for example KV or s
 
 Facts about the model that every serving, capacity or quality decision in this project depends on. The serving engine and its flags are in the `vllm-fork-serving` skill.
 
-Evidence labels: **Observed** (we measured or read it; path given), **Reported** (a named source says it), **Inferred** (derived; the link is given), **Hypothesis** (to test), **Unknown** (no source has it). Section marks such as §29.5 point to `ARQUITETURA.md`, the Portuguese working journal. The journal, `NOTAS.md` and the harness under `f3/` currently live in the working tree `/home/paulo/Projetos/infer`, not in this repository; paths below are written as `f3/...` relative to that tree. When the journal contradicts itself, later sections and "Correção posterior" notes win, and `docs/README.md` lists the known contradictions with their current values.
+Evidence labels: **Observed** (we measured or read it; path given), **Reported** (a named source says it), **Inferred** (derived; the link is given), **Hypothesis** (to test), **Unknown** (no source has it). Section marks such as §29.5 point to `ARQUITETURA.md`, the Portuguese working journal. The journal and `NOTAS.md` live outside this repository. The harness is in `bench/` of this repository; raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive. When the journal contradicts itself, later sections and "Correção posterior" notes win, and `docs/README.md` lists the known contradictions with their current values.
 
 Almost every number here comes from one run per cell, without confidence intervals. Read them as orders of magnitude.
 
@@ -67,7 +67,7 @@ Almost every number here comes from one run per cell, without confidence interva
 
 ### 4. Keep MoE activations in 16 bits (W4A16)
 
-- **Rule.** Decode runs the MoE as W4A16. The launch scripts set `B12X_W4A16_FP32_TOPK_WEIGHTS=1` and `VLLM_B12X_MOE_FP4_FORCE_A16=1` (Observed in `f3/sglang/servidor-vllm-direto.sh`).
+- **Rule.** Decode runs the MoE as W4A16. The launch scripts set `B12X_W4A16_FP32_TOPK_WEIGHTS=1` and `VLLM_B12X_MOE_FP4_FORCE_A16=1` (Observed in `bench/server-vllm-direct.sh`).
 - **Why.** The `llm-inference-bench` README reference table (vLLM b12x, 500 requests per cell) gives 0% needle errors with W4A16, 6% to 9% with W4A4 and 18% to 23% with a pre-QAD checkpoint (Reported, §29.4). On our host, SGLang with the NVIDIA NVFP4 checkpoint erred 60 in 500 with W4A4 MoE and 32 in 500 with Marlin W4A16; the difference is significant (p = 0.003), so activation quantization explains about half of that error (Observed, §29.5).
 - **Cost.** 16-bit activations cost 10% to 11% of prefill in the fork's R33 measurement (Reported, §10.4 item 1).
 - **Unknown.** The scripts also set `B12X_W4A16_A4_PREFILL=1`. The fork's change log describes a hybrid mode with calibrated A4 prefill and A16 decode and verify (`vllm-hybrid-a4-semantic-prefill`, §23.3); which mode was actually active in our runs was never checked.
@@ -111,12 +111,12 @@ Why it is the quality alarm (Inferred from the tables above): it is cheap, it yi
 The gate in force (decided 2026-11-12, §29.5):
 
 ```bash
-# 500 runs at C8 and 120 at C16 plus gsm8k (96), run by comparativo.sh before any speed number
-python3 f3/sglang/resumir.py --preco <USD_per_hour> --needle-ref 3/500 <result_dirs>
-# each arm is marked ok or REPROVA; one-sided Fisher exact test, fail when worse than 3/500 at p < 0.05
+# 500 runs at C8 and 120 at C16 plus gsm8k (96), run by run_benchmark.sh before any speed number
+python3 bench/summarize.py --price <USD_per_hour> --needle-ref 3/500 <result_dirs>
+# each arm is marked ok or FAIL; one-sided Fisher exact test, fail when worse than 3/500 at p < 0.05
 ```
 
-Tests for the verdict logic: `f3/sglang/test_resumir.py` (20 tests, `uvx pytest`).
+Tests for the verdict logic: `bench/test_summarize.py` (20 tests, `uvx pytest`).
 
 ### Evaluate a new checkpoint
 
@@ -178,4 +178,4 @@ With the official NVIDIA or RedHat checkpoints the smallest RTX unit is TP4 (Inf
 - `ARQUITETURA.md` §2 and its correction note, §7.3, §8.2, §8.3, §9.3, §10.1, §10.4, §10.5, §12.2, §12.3, §23.3, §29.2, §29.4, §29.5, §29.6, §29.8, §29.9, §29.10
 - `NOTAS.md`, "Arquitetura dos modelos" (config and `quantization_config` reads)
 - Server logs: `f3/resultados/rtx-20261105/r1-servidor.log`, `f3/resultados/vast-20261111/vllm/*/servidor-direto.log`
-- Gate code: `f3/sglang/resumir.py`, `f3/sglang/test_resumir.py`
+- Gate code: `bench/summarize.py`, `bench/test_summarize.py`

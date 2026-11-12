@@ -9,7 +9,7 @@ The router decides which 4-GPU replica serves each request. For coding-agent tra
 
 Everything we know about the router was measured on the **mini model**: `glm5next` mini, random weights, 2 full attention layers, 1 RTX PRO 6000 per replica, 2 replicas, vLLM 0.32.0, llm-d v1.0.0, Nebius `uk-south2` (§7). Nothing about routing has been measured on the **real model** (GLM-5.3-Flash, TP4 on 4 RTX PRO 6000). Mini results transfer as mechanisms, not as numbers.
 
-Harness paths below are written `f3/...`. They currently live in `/home/paulo/Projetos/infer`, not in this repository. `docs/` means `docs/` of this repository; `§N` points to `ARQUITETURA.md` in `/home/paulo/Projetos/infer` (Portuguese, later sections replace earlier ones).
+Harness paths (`router/`, `bench/`) are relative to the root of this repository. Raw results are cited as `results archive: f3/resultados/...`, a path inside the published results archive. `docs/` means `docs/` of this repository; `§N` points to `ARQUITETURA.md`, the Portuguese working journal kept outside this repository (later sections replace earlier ones).
 
 Evidence labels: Observed (we measured it; "(mini)" or "(real)" says on which model), Reported (named source says it), Inferred (derived; the link is given), Hypothesis (to validate), Unknown.
 
@@ -26,7 +26,7 @@ Evidence labels: Observed (we measured it; "(mini)" or "(real)" says on which mo
 
 ### 1. Approximate prefix affinity plus token load, the "optimized baseline" profile
 
-What runs (Observed in `f3/llmd/router-mini.values.yaml`, §4): plugins `approx-prefix-cache-producer` (with `blockSizeTokens: 8704` and `maxPrefixTokensToMatch: 262144`), `inflight-load-producer`, `prefix-cache-affinity-filter` and `token-load-scorer`. The scheduling profile `default` applies the filter, then the scorer. The values file is the last layer on top of the llm-d v1.0.0 guide files `guides/recipes/router/base.values.yaml` and `guides/optimized-baseline/router/optimized-baseline.values.yaml`, deployed with the chart `oci://ghcr.io/llm-d/charts/llm-d-router-standalone --version v1.0.0`.
+What runs (Observed in `router/router-mini.values.yaml`, §4): plugins `approx-prefix-cache-producer` (with `blockSizeTokens: 8704` and `maxPrefixTokensToMatch: 262144`), `inflight-load-producer`, `prefix-cache-affinity-filter` and `token-load-scorer`. The scheduling profile `default` applies the filter, then the scorer. The values file is the last layer on top of the llm-d v1.0.0 guide files `guides/recipes/router/base.values.yaml` and `guides/optimized-baseline/router/optimized-baseline.values.yaml`, deployed with the chart `oci://ghcr.io/llm-d/charts/llm-d-router-standalone --version v1.0.0`.
 
 - The approximate producer is the EPP's own index. It learns only from the routing decisions it makes and gets no feedback from the engine (Observed in config, §4). That is why it cannot see evictions (decision 3).
 - `token-load-scorer` scores on uncached in-flight tokens. Upstream calls this default "sticky until saturated" and reports 2.9x input throughput on code generation, 46k against 16k tok/s (Reported, llm-d blog via the KV report, `docs/04-kv-cache-routing-and-disaggregation.md` §4.1).
@@ -41,13 +41,13 @@ Why this profile: it is the only one we ran, and on the mini it did what it prom
 | Warmed A/B: prompt tokens computed | 1,311,296 | 2,129,472 |
 | Warmed A/B: TTFT p50 / p99 / max | 0.135 / 0.324 / 0.387 s | 0.174 / 0.304 / 0.315 s |
 
-Affinity cut computed prefill by 38% and median TTFT by 22% with no tail cost in that regime (Observed (mini), §9.1). Data: `f3/resultados/exp-20261105/` and `f3/resultados/ab-aquecido-20261105/`.
+Affinity cut computed prefill by 38% and median TTFT by 22% with no tail cost in that regime (Observed (mini), §9.1). Data in the results archive: `f3/resultados/exp-20261105/` and `f3/resultados/ab-aquecido-20261105/`.
 
 Not proven on any model: behaviour under memory pressure, with more than 2 replicas, and with load that saturates the replicas (§7.1, §7.4). Demand-limited load does not measure capacity (§9.1).
 
 ### 2. `blockSizeTokens` must equal the engine's KV block
 
-The EPP hashes prompts in blocks of `blockSizeTokens`. If that does not match the block the engine caches, the EPP hashes never match the real cache (Observed, comment in `f3/llmd/router-mini.values.yaml`). On the mini the block was 8,704 tokens, read from vLLM's `cache_config_info`. The block size of the real model under the fork image is Unknown in our sources: read it from the real engine before writing the value. Test prefixes must also be longer than one block, or the vLLM prefix cache never hits (Observed, comment in `f3/llmd/bench/inference-perf.yaml`: 17,500 tokens = 2 blocks, 17,408 reusable).
+The EPP hashes prompts in blocks of `blockSizeTokens`. If that does not match the block the engine caches, the EPP hashes never match the real cache (Observed, comment in `router/router-mini.values.yaml`). On the mini the block was 8,704 tokens, read from vLLM's `cache_config_info`. The block size of the real model under the fork image is Unknown in our sources: read it from the real engine before writing the value. Test prefixes must also be longer than one block, or the vLLM prefix cache never hits (Observed, comment in `router/bench/inference-perf.yaml`: 17,500 tokens = 2 blocks, 17,408 reusable).
 
 ### 3. Set `lruCapacityPerServer` by hand, with `autoTune: false`
 
@@ -109,23 +109,23 @@ No KV shared across regions.
 
 ### Reproduce the mini routing tests (Kubernetes, as run on Nebius)
 
-Scripts in `f3/llmd/`. They assume a cluster with `KUBECONFIG=f3/kubeconfig`, namespace `llm-d-optimized-baseline`, replicas labelled `app=vllm-mini`, the llm-d v1.0.0 clone at `f3/llm-d`, and the EPP service `optimized-baseline-epp:80`.
+Scripts in `router/`. They assume a cluster reachable through `KUBECONFIG` (required), namespace `llm-d-optimized-baseline`, replicas labelled `app=vllm-mini`, a clone of llm-d at tag v1.0.0 in `LLMD_DIR` (required by `router_mode.sh` and `run_ab.sh`), the `make-mini` ConfigMap with `make_mini.py` (not in this repository), and the EPP service `optimized-baseline-epp:80`. Results go to `results/` at the repository root unless `OUT` is set.
 
 ```bash
-cd f3/llmd/exp
-bash modo_router.sh afinidade      # helm upgrade with affinity, then POST /reset_prefix_cache on each replica
-bash run_exp.sh rot21-afinidade roteamento --grupos 21 --repeticoes 3
-bash run_exp.sh rajada51-afinidade-r1 rajada --rajada 51   # repeat as -r2, -r3; reset the cache between runs
-bash modo_router.sh so-carga       # adds f3/llmd/bench/router-sem-prefixo.values.yaml
-bash run_exp.sh rot21-so-carga roteamento --grupos 21 --repeticoes 3
-bash run_exp.sh rajada51-so-carga-r1 rajada --rajada 51
+cd router/exp
+bash router_mode.sh affinity       # helm upgrade with affinity, then POST /reset_prefix_cache on each replica
+bash run_exp.sh rot21-affinity routing --groups 21 --repetitions 3
+bash run_exp.sh burst51-affinity-r1 burst --burst 51   # repeat as -r2, -r3; reset the cache between runs
+bash router_mode.sh load-only      # adds router/bench/router-no-prefix.values.yaml
+bash run_exp.sh rot21-load-only routing --groups 21 --repetitions 3
+bash run_exp.sh burst51-load-only-r1 burst --burst 51
 
-cd ../bench && AQUECER=1 bash run_ab.sh   # warmed A/B, both modes, inference-perf at 3 req/s
+cd ../bench && WARMUP=1 bash run_ab.sh   # warmed A/B, both modes, inference-perf at 3 req/s
 ```
 
-The `run_exp.sh` arguments are Inferred from `sessions.py` options and the result file names in `f3/resultados/exp-20261105/`; the exact command lines were not recorded. `sessions.py` defaults to `--grupos 20`, so pass 21 every time (see pitfalls).
+The `run_exp.sh` arguments are Inferred from `sessions.py` options and the result file names in `f3/resultados/exp-20261105/`; the exact command lines were not recorded. The archived runs used the Portuguese names of the time (modes `roteamento`, `ciclico`, `rajada`, `afinidade`, `so-carga`; flags `--grupos`, `--repeticoes`, `--rajada`), now `routing`, `cyclic`, `burst`, `affinity`, `load-only`, `--groups`, `--repetitions`, `--burst`. `sessions.py` defaults to `--groups 20`, so pass 21 every time (see pitfalls).
 
-How `sessions.py` measures (Observed in code): prompts are seeded random token IDs; the client calls the EPP at `/v1/completions` with streaming; it attributes each request to a replica by the delta of `vllm:prompt_tokens_by_source_total` (`local_cache_hit`, `local_compute`, `external_kv_transfer`) scraped from each replica's `/metrics`. The `rajada` mode first sends one request with the prefix to warm one replica, then fires N in parallel.
+How `sessions.py` measures (Observed in code): prompts are seeded random token IDs; the client calls the EPP at `/v1/completions` with streaming; it attributes each request to a replica by the delta of `vllm:prompt_tokens_by_source_total` (`local_cache_hit`, `local_compute`, `external_kv_transfer`) scraped from each replica's `/metrics`. The `burst` mode first sends one request with the prefix to warm one replica, then fires N in parallel.
 
 ### Repeat them on the real model (phase 3 of `docs/06`, not yet run)
 
@@ -135,14 +135,14 @@ What has to change, each item from the code or sources:
 
 1. Two replicas need two `g7e.24xlarge` or one `g7e.48xlarge` (`docs/06`).
 2. `blockSizeTokens` in the EPP config and `BLOCO = 8704` in `sessions.py` must be the real engine's block (decision 2). Choose the prefix as a whole number of blocks plus a short question, as the mini test did (17,408 = 2 x 8,704, question 512).
-3. `sessions.py` hardcodes `EPP = "http://optimized-baseline-epp:80"` and model name `"mini"`; `run_exp.sh` and `modo_router.sh` use `kubectl` and `helm`. Outside Kubernetes these need an equivalent that points at Envoy and the replicas' IPs. Not written yet.
+3. `sessions.py` hardcodes `EPP = "http://optimized-baseline-epp:80"` and model name `"mini"`; `run_exp.sh` and `router_mode.sh` use `kubectl` and `helm`. Outside Kubernetes these need an equivalent that points at Envoy and the replicas' IPs. Not written yet.
 4. Whether the fork image exports `vllm:prompt_tokens_by_source_total` is Unknown. Check `/metrics` on the real server before the run; without it, replica attribution fails.
-5. Reset the prefix cache on every replica before each mode (`POST /reset_prefix_cache`, as `modo_router.sh` does), and discard a warm-up before each timed run (the 2.18 s tail was a cold start, §9.1).
+5. Reset the prefix cache on every replica before each mode (`POST /reset_prefix_cache`, as `router_mode.sh` does), and discard a warm-up before each timed run (the 2.18 s tail was a cold start, §9.1).
 6. Repeat each burst 3 times per mode. One run is not evidence (§9.1).
 
 Tests the real model needs that the mini never ran (proposals, not yet specified in the sources beyond their names):
 
-- Index capacity: the `ciclico` mode of `sessions.py` (S sessions visited in cyclic order for T passes) with a working set larger than the HBM pool, default `lruCapacityPerServer` against a fixed value. On the mini this pattern drove the LRU hit rate to 0% (Observed (mini), §7.2).
+- Index capacity: the `cyclic` mode of `sessions.py` (S sessions visited in cyclic order for T passes) with a working set larger than the HBM pool, default `lruCapacityPerServer` against a fixed value. On the mini this pattern drove the LRU hit rate to 0% (Observed (mini), §7.2).
 - More than 2 replicas, and saturating load (§7.1 "not proven").
 - E10: `calibrate.sh` on TP4 for `peakPrefillThroughput` (§17.6).
 - E6: burst of 51 with the prefix outside HBM, with and without single-flight, LMCache TTLs at 7200 s (§17.6).
@@ -182,8 +182,8 @@ Tests the real model needs that the mini never ran (proposals, not yet specified
 
 ## Sources
 
-- `ARQUITETURA.md` (in `/home/paulo/Projetos/infer`): §4, §7.1 to §7.4, §8.1, §8.4, §9.1, §12.2, §16, §17.2 to §17.6, §20.1, §24.1, §25.1, §29.7.
+- `ARQUITETURA.md` (Portuguese working journal, outside this repository): §4, §7.1 to §7.4, §8.1, §8.4, §9.1, §12.2, §16, §17.2 to §17.6, §20.1, §24.1, §25.1, §29.7.
 - `docs/04-kv-cache-routing-and-disaggregation.md` §4 and §6; `docs/06-aws-implementation-plan.md` phase 3; `docs/README.md` contradictions table.
-- Code and config: `f3/llmd/router-mini.values.yaml`, `f3/llmd/bench/router-sem-prefixo.values.yaml`, `f3/llmd/bench/run_ab.sh`, `f3/llmd/bench/inference-perf.yaml`, `f3/llmd/exp/modo_router.sh`, `f3/llmd/exp/run_exp.sh`, `f3/llmd/exp/sessions.py`.
+- Code and config: `router/router-mini.values.yaml`, `router/bench/router-no-prefix.values.yaml`, `router/bench/run_ab.sh`, `router/bench/inference-perf.yaml`, `router/exp/router_mode.sh`, `router/exp/run_exp.sh`, `router/exp/sessions.py`.
 - Results: `f3/resultados/exp-20261105/` (`rot21-*`, `rajada51-*-r1..r3`), `f3/resultados/ab-aquecido-20261105/`.
 - External, as Reported in the sources above: llm-d blogs "Sticky Until Saturated" and "Serving GLM-5.2 for Agentic Workloads on llm-d", llm-d GLM-5.2 and Qwen3.5-397B guides, llm-d-router #1650 and #3875, LMCache PR #5307, MemServe.
