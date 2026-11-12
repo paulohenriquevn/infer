@@ -34,7 +34,7 @@ Inferred consequences:
 
 | Decision | Options | Recommendation |
 |---|---|---|
-| IaC tool | Terraform, AWS CDK | Open. Pick before the first line of infrastructure code; nothing below depends on the choice |
+| IaC tool | Terraform, AWS CDK | Decided on 2026-11-12: Terraform, state in S3 with locking (`decisions/2026-11-12-infrastructure-as-code-tool.md`) |
 | Orchestration for the first phases | Plain EC2 with a startup script; EKS | Plain EC2 for phases 1 to 3. The llm-d EPP runs outside Kubernetes (standalone EPP + Envoy + file discovery, Reported in LMCache PR 5307 validation). Move to EKS when autoscaling and rollouts are needed (phase 5) |
 | Region | Any region with G7e capacity | Open: depends on capacity and quota answers, and on where the users are |
 | Weight storage | EBS gp3/io2, instance store, S3 + local copy, FSx for Lustre | Open. Startup is dominated by weight loading (888 s from a slow network disk vs 134 s with a fast disk and `--load-format instanttensor`, §12.1). Measure in phase 1 |
