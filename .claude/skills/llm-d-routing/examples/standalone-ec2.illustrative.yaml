@@ -1,0 +1,76 @@
+# ILLUSTRATIVE, NOT MEASURED, NEVER RUN.
+#
+# EPP config for one cell of GLM-5.3-Flash replicas on plain EC2, for phases 1 to 3 of
+# docs/06-aws-implementation-plan.md. It merges two llm-d v1.0.0 files (Reported, local clone):
+#   guides/no-kubernetes-deployment/router/epp/config.yaml   (file discovery and metrics data layer)
+#   guides/optimized-baseline/router/optimized-baseline.values.yaml   (the plugin set we tested on the mini)
+# The no-Kubernetes guide's own scorer mix (queue, kv-cache-utilization, prefix-cache, no-hit-lru)
+# is replaced here by the optimized-baseline set, because that is what the mini results measured.
+#
+# Run it with the guide's command (references/standalone-epp.md):
+#   --config-file=/etc/epp/config.yaml --pool-name=file-discovery --pool-namespace=default
+#   --grpc-port=9002 --grpc-health-port=9003 --metrics-port=9090 --secure-serving=false
+#   --health-checking=true --v=2
+# and the guide's envoy.yaml unchanged.
+apiVersion: llm-d.ai/v1
+kind: EndpointPickerConfig
+plugins:
+  - name: file-discovery
+    type: file-discovery
+    parameters:
+      path: /etc/epp/endpoints.yaml
+      watchFile: true
+
+  - type: approx-prefix-cache-producer
+    parameters:
+      autoTune: false
+      # Fork image karmic-kraken-20261016 without LMCache logs "target block size 2048 tokens"
+      # (Observed). Use 1024 if the replicas run LMCache. Re-read on every new image.
+      blockSizeTokens: 2048
+      maxPrefixTokensToMatch: 262144
+      # KV pool per replica / blockSizeTokens. 3315 = 6,789,052 / 2,048 for DCP1 (pool Observed
+      # on one Vast host). Recompute from the pool the server logs on AWS.
+      lruCapacityPerServer: 3315
+  - type: inflight-load-producer
+  - type: prefix-cache-affinity-filter
+    # Without parameters the defaults apply (peakPrefillThroughput 15928, maxTTFTPenaltyMs 18000),
+    # calibrated for Qwen3-32B on H100 TP2. Set both after calibration
+    # (references/scorers-and-saturation.md).
+  - type: token-load-scorer
+
+  - name: metrics-source
+    type: metrics-data-source
+  - name: metrics-extractor
+    type: core-metrics-extractor
+
+schedulingProfiles:
+  - name: default
+    plugins:
+      - pluginRef: prefix-cache-affinity-filter
+      - pluginRef: token-load-scorer
+
+dataLayer:
+  injectDefaults: false
+  discovery:
+    endpoints:
+      pluginRef: file-discovery
+  sources:
+    - pluginRef: metrics-source
+      extractors:
+        - pluginRef: metrics-extractor
+
+# /etc/epp/endpoints.yaml, written by the launch script after each replica answers /health and
+# finished its warm-up; replaced by atomic rename (mv endpoints.yaml.tmp endpoints.yaml).
+# Literal private IPv4 only; the plugin does not resolve hostnames.
+#
+# endpoints:
+#   - name: glm53-a-0
+#     address: 10.0.1.10
+#     port: "8000"
+#     labels:
+#       model: GLM-5.3-Flash-NVFP4
+#   - name: glm53-a-1
+#     address: 10.0.1.11
+#     port: "8000"
+#     labels:
+#       model: GLM-5.3-Flash-NVFP4

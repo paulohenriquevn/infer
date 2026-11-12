@@ -9,7 +9,7 @@ Price and quota as last read (Observed on 2026-11-04 in the AWS Price List API a
 - On-demand list price in `us-east-1`: `g7e.24xlarge` US$ 16.57/h, `g7e.48xlarge` US$ 33.14/h, or US$ 4.14 per GPU-hour. G7e was offered in `us-east-1b`, `1c` and `1d`.
 - Quota for G and VT on-demand vCPUs was 0 in every region checked; a request for 96 vCPUs (one `g7e.24xlarge`, Inferred: if G7e counts against that quota) was pending.
 
-At list price a replica costs 3 times the Vast host 157204 (US$ 5.61/h) and 2.3 times the Nebius list price (US$ 1.80 per GPU-hour). With the measured 24 sessions per replica (DCP1, one run), that is about 1.45 sessions per US$/h on AWS on-demand, against 4.28 on host 157204 (Inferred, same sessions, different price). Discounts (Savings Plans, reserved capacity) were not read. The plan therefore starts with one instance that must reproduce the numbers measured elsewhere before anything is built around it.
+At list price a replica costs 3 times the Vast host 157204 (US$ 5.61/h) and 2.3 times the Nebius list price (US$ 1.80 per GPU-hour). With the measured 24 sessions per replica (DCP1, one run), that is about 1.45 sessions per US$/h on AWS on-demand, against 4.28 on host 157204 (Inferred, same sessions, different price). Discounted price (Observed on 2026-11-12 in the AWS Price List files, `us-east-1`, no upfront): EC2 Instance Savings Plan US$ 10.44/h for 1 year and US$ 7.16/h for 3 years, which gives about 3.35 sessions per US$/h at 24 sessions with the 3-year plan (Inferred). The plan therefore starts with one instance that must reproduce the numbers measured elsewhere before anything is built around it.
 
 Each phase below ends in acceptance criteria that someone can check and fail. A phase starts only when the previous one passed.
 
@@ -35,7 +35,7 @@ Inferred consequences:
 | Decision | Options | Recommendation |
 |---|---|---|
 | IaC tool | Terraform, AWS CDK | Decided on 2026-11-12: Terraform, state in S3 with locking (`decisions/2026-11-12-infrastructure-as-code-tool.md`) |
-| Orchestration for the first phases | Plain EC2 with a startup script; EKS | Plain EC2 for phases 1 to 3. The llm-d EPP runs outside Kubernetes (standalone EPP + Envoy + file discovery, Reported in LMCache PR 5307 validation). Move to EKS when autoscaling and rollouts are needed (phase 5) |
+| Orchestration for the first phases | Plain EC2 with a startup script; EKS | Plain EC2 for phases 1 to 3. The llm-d EPP runs outside Kubernetes (standalone EPP + Envoy + file discovery, Reported: llm-d `v1.0.0` guide `guides/no-kubernetes-deployment`; LMCache PR 5307 used this setup in its validation). Move to EKS when autoscaling and rollouts are needed (phase 5) |
 | Region | Any region with G7e capacity | Open: depends on capacity and quota answers, and on where the users are |
 | Weight storage | EBS gp3/io2, instance store, S3 + local copy, FSx for Lustre | Open. Startup is dominated by weight loading (888 s from a slow network disk vs 134 s with a fast disk and `--load-format instanttensor`, §12.1). Measure in phase 1 |
 | Purchase model | On-demand, Savings Plans, Capacity Blocks, Spot | Open until discounted prices are read: on-demand list price makes AWS the most expensive provider measured. Spot preemption cost a replica about 23 min of cold start on Nebius (§9.3) |
@@ -104,7 +104,7 @@ Scope, to be specified when phases 1 to 4 have passed:
 ## Open questions
 
 1. Current G7e price, discounted price (Savings Plans or reserved capacity), capacity and the status of the quota request (last read on 2026-11-04).
-2. Which GPU driver the G7e AMI ships, and whether the fork image runs at full speed on it. The image expects driver 615.65.02 or newer (§25). Host 157204 ran 615.71.09; Nebius ran 580.173 and worked (§12.1); the slow host 48294 ran 580.95.05 (§29.10). Record the driver in phase 1.
+2. Whether the fork image runs at full speed on G7e. The AWS Deep Learning Base OSS AMI (Ubuntu 24.04, release 2026-10-27) ships NVIDIA driver 595.112.07 (Reported, DLAMI release notes, read 2026-11-12), older than the 615.65.02 the image expects (§25), so phase 1 must install a newer driver or prove 595 works. The image digest to pin is `sha256:c14295c214f6...0e38` (project version manifest, not published). Host 157204 ran 615.71.09; Nebius ran 580.173 and worked (§12.1); the slow host 48294 ran 580.95.05 (§29.10). Record the driver in phase 1.
 3. Whether GPU peer-to-peer is enabled inside `g7e.24xlarge` (required for the B12X PCIe all-reduce).
 4. Whether EFA changes the case for P2P KV sharing between replicas or for P/D. Untested anywhere.
-5. Shared storage for weights and for an LMCache L2 tier: which AWS service gives the read bandwidth needed (Nebius shared filesystem measured 2 GiB/s per stream, §12.1).
+5. Weights: `g7e.24xlarge` has 2 x 3,800 GB local NVMe instance store (Reported, AWS price list and G7e page, read 2026-11-12), enough to cache the 177.7 GB checkpoint per instance; its read speed is Unknown until phase 1. Shared storage for weights and for an LMCache L2 tier: which AWS service gives the read bandwidth needed (Nebius shared filesystem measured 2 GiB/s per stream, §12.1).

@@ -70,6 +70,15 @@ The journal grew over two weeks and some early numbers were superseded without b
 | b12x repository | active (§13.3) | archived, moved into FlashInfer (§22.1) |
 | TTFT target scope | 5 s for turns with up to 8K new tokens (§20) | `summarize.py` applies 5 s to every cached turn |
 | SGLang decision reason "llm-d reads vLLM KV events" (§29.7) | | Corrected on 2026-11-12: only the approximate router mode, which ignores events, was tested |
+| Per-turn recompute of 3K to 6K tokens | A tail the hybrid KDA cache does not reuse; drives TTFT p95 (§26.2, §29.2) | It is the new tool block of each turn plus 1 token, in 100% of vLLM turns; the cache loses nothing (Observed 2026-11-12 in the raw `agentes-*.json`) |
+| DCP4 at 24 agents | "not measured" | Attempted for 7 minutes in `vast-vllm-r1` (files copied from the `agentes-7min/` attempt), no steady sample |
+| Fork block size | Unknown | `target block size 2048 tokens` in every fork log (1024 in the LMCache run) |
+| LMCache PR #5695 | open | closed without merge on 2026-11-09 |
+| Source for the EPP outside Kubernetes | LMCache PR #5307 | the llm-d `v1.0.0` guide `guides/no-kubernetes-deployment`; PR #5307 only mentions the setup |
+| B12X in upstream vLLM | absent (§10.3) | upstream `main` has a b12x attention backend and `--prefill-schedule-interval` since October 2026 |
+| G7e discount and driver | Unknown | 3-year EC2 Instance Savings Plan US$ 7.16/h; DLAMI Base OSS ships driver 595.112.07, below the 615.65.02 the image expects |
+| Fork image digest | Unknown | `sha256:c14295c214f6...0e38` (project version manifest) |
+| Replicas for 12 load VMs (§18.1) | 22 | 24 (12 VMs hold 2 replicas each) |
 
 Further per-topic inconsistencies are listed at the end of `04-kv-cache-routing-and-disaggregation.md`.
 

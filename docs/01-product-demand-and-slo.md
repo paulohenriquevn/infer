@@ -125,9 +125,11 @@ times (Inferred, `φ' = bφ/(bφ+(1−φ))`). Every gain in per-stream speed the
 
 ### What the benchmark harness saw (§29.2)
 
-On both engines tested, each cached turn re-prefilled 3,200 to 3,800 tokens at p50 and 5,300 to
-5,900 at p90 even with about 97% of the prompt from cache (Observed). This is the tail the hybrid
-cache does not reuse, and on vLLM it is what moves TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32.
+On both engines tested, each cached turn prefilled 3,200 to 3,800 tokens at p50 and 5,300 to
+5,900 at p90 even with about 97% of the prompt from cache (Observed). On vLLM these are exactly the
+new tool block of the turn plus 1 token (Observed on 2026-11-12 in every `agentes-*.json`), so the
+hybrid cache loses nothing; the earlier reading as a cache tail (§26.2, §29.2) was wrong. New-token
+prefill plus queueing moves TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32 (Inferred).
 
 ## Demand sizing from 1,000 to 10,000 users
 

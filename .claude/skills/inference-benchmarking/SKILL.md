@@ -11,6 +11,23 @@ Harness paths (`bench/`, `router/`) are relative to the root of this repository.
 
 Evidence labels: Observed (we measured it; "(mini)" or "(real)" says on which model), Reported (named source says it), Inferred (derived; the link is given), Hypothesis (to validate), Unknown. Every number in this skill is on the **real model** (GLM-5.3-Flash on 4x RTX PRO 6000 Server Edition) unless it says mini.
 
+## Files in this skill
+
+Read SKILL.md first. Open a reference only when the task needs it.
+
+| File | Read it when |
+|---|---|
+| [references/harness-walkthrough.md](references/harness-walkthrough.md) | you run or change `run_benchmark.sh`, need an env var, an exit code, an output file schema, or how the agents scenario works |
+| [references/slo-and-summary.md](references/slo-and-summary.md) | a `summarize.py` verdict surprises you, or you change the SLO logic; each rule with its code and test |
+| [references/quality-gate-statistics.md](references/quality-gate-statistics.md) | you judge a needle result, pick `NEEDLE_RUNS` or `--needle-ref`, or must explain the Fisher test and its power |
+| [references/vast-workflow.md](references/vast-workflow.md) | you rent a Vast.ai machine: offer choice, every `vast.sh` command, cost control, lessons of hosts 157204 and 48294 |
+| [references/result-writeup-template.md](references/result-writeup-template.md) | you write a benchmark number into `docs/`, a decision or a PR; the template and why each field exists |
+| [examples/summarize-three-runs.md](examples/summarize-three-runs.md) | you want real `summarize.py` output (DCP1, DCP4 run 1, DCP4 run 2) and how to read it |
+| [examples/failing-gate-nvfp4-1d00738.md](examples/failing-gate-nvfp4-1d00738.md) | a needle gate fails; a real failure judged end to end |
+| [examples/agents-24-json-explained.md](examples/agents-24-json-explained.md) | you open an `agents-<N>.json` by hand; every field of a real file |
+| [examples/writeup-dcp1-run1.md](examples/writeup-dcp1-run1.md) | you need a filled-in write-up to copy |
+| [examples/host-48294-qualification-failure.md](examples/host-48294-qualification-failure.md) | a run is much slower than expected and you must decide if the host is to blame |
+
 ## When to use
 
 - Comparing engines, checkpoints, DCP1 against DCP4, or LMCache against HBM only.
@@ -51,7 +68,7 @@ Observed in `evaluate_agents`:
 - **Minimum 20 steady-state turns per level** (`--min-turns`, default 20 on the command line). Below that the level prints `short sample` and does not pass. Note: the `Slo` dataclass default is 1; the 20 comes from the CLI only.
 - **Cut turns are excluded.** Turns marked `stopped` or `aborted` (cut by the end of the level) have no usage and are dropped.
 - **`cached_tokens` must be reported.** If no steady-state turn in a level reports it, the script raises `MissingCacheReport`: start vLLM with `--enable-prompt-tokens-details` or SGLang with `--enable-cache-report`. When only some turns omit it, they count as 0 (SGLang omits the field when nothing came from cache; vLLM reports 0) (§29.4).
-- It also prints recomputed tokens per turn (prompt minus cached, p50 and p90) and the cache share. Each cached turn recomputes 3,200 to 3,800 tokens at p50 and 5,300 to 5,900 at p90 even with about 97% from cache, the tail the hybrid KDA cache does not reuse. On vLLM that tail moves TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32 (Observed (real), §29.2).
+- It also prints recomputed tokens per turn (prompt minus cached, p50 and p90) and the cache share. Each cached turn prefills 3,200 to 3,800 tokens at p50 and 5,300 to 5,900 at p90 even with about 97% from cache. On vLLM these are the turn's new tool block plus 1 token in 100% of turns (Observed, raw `agentes-*.json`); §29.2 read them as a hybrid-cache tail, which is wrong. TTFT p95 on vLLM rises from 3.4 s at 8 agents to 6.1 s at 32 (Observed (real), §29.2).
 
 ### 4. The quality gate comes first
 
@@ -64,16 +81,16 @@ An arm counts only if it passes, and the gate runs before any speed measurement 
 
 Why not 120/120 (the §27.4 gate, replaced on 2026-11-12 by §29.5): the reference itself erred 3 times in 500 (0.6%), so 120/120 fails good configurations by chance and cannot rank two good ones. Telling 0% from 0.8% takes about a thousand runs per arm (§29.4, §29.5).
 
-What the gate caught (Observed (real), §29.5, §29.10; p-values were computed two-sided before the one-sided rule, conclusions unchanged):
+What the gate caught (counts Observed (real), §29.5, §29.10; one-sided p of the C8 file against 3/500, Inferred with `fisher_one_sided` on 2026-11-12; the journal printed two-sided values, conclusions unchanged; full table in `references/quality-gate-statistics.md`):
 
-| Configuration | Errors at C8 | Errors at C16 | p vs reference |
+| Configuration | Errors at C8 | Errors at C16 | One-sided p at C8 |
 |---|---|---|---|
 | vLLM DCP4 (reference) | 3 / 500 | 0 / 120 | |
-| vLLM DCP1, two runs | 3 / 620 | 1 / 240 | passes |
-| SGLang FP8 | 4 / 240 | 0 / 240 | 0.72 (two-sided, on 4/480 pooled) |
-| SGLang NVFP4 `1d00738`, MoE W4A4 | 60 / 500 | 19 / 120 | 2e-15 |
-| Same, MoE in Marlin (W4A16) | 32 / 500 | 5 / 120 | 3e-7 |
-| Same, Marlin, no speculation, SSM state FP32 | 22 / 500 | 10 / 120 | 1e-4 |
+| vLLM DCP1, two runs (3/120 on 157204, 0/500 on 48294) | 3 / 620 | 1 / 240 | 0.090 and 1, each passes |
+| SGLang FP8, two runs (1/120 and 3/120) | 4 / 240 | 0 / 240 | 0.58 and 0.090, each passes |
+| SGLang NVFP4 `1d00738`, MoE W4A4 | 60 / 500 | 19 / 120 | 8.2e-16 |
+| Same, MoE in Marlin (W4A16) | 32 / 500 | 5 / 120 | 1.4e-7 |
+| Same, Marlin, no speculation, SSM state FP32 | 22 / 500 | 10 / 120 | 6.6e-5 |
 
 ### 5. Two runs, and 20% to switch engines
 
@@ -84,7 +101,7 @@ What the gate caught (Observed (real), §29.5, §29.10; p-values were computed t
 
 ### 6. Qualify the host before measuring anything
 
-- The same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host: Vast host 48294 gave 108 / 298 / 350 / 296 tok/s at C1 / C8 / C16 / C32 against 154 / 696 / 1,072 / 1,578 on host 157204, with the same image, checkpoint and harness. Startup took 1,084 s against 260 s; at 16 agents only 2 or 3 requests ran with 21 queued and 5% of KV used; GPUs drew about 116 W (Observed (real), §29.10). Cause Unknown. Host 48294 ran driver 580.95.05, host 157204 ran 615.71.09, and Nebius R1 ran 580.173 at 1,425 tok/s at C32, so the driver alone does not explain it (Inferred). Hypothesis: something outside the GPUs (another tenant, CPU or memory).
+- The same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host: Vast host 48294 gave 108 / 299 / 351 / 298 tok/s at C1 / C8 / C16 / C32 against 154 / 696 / 1,073 / 1,580 on host 157204 (`aggregate_tps` in each `decode.json`), with the same image, checkpoint and harness. Startup took 1,084 s against 260 s; at 16 agents the server ran at most 6 requests with up to 15 waiting and 11% of KV used (`agentes-16.json`; §29.10 read 2 or 3 running and 21 queued from the progress log); GPUs drew about 116 W (Observed (real), §29.10). Cause Unknown. Host 48294 ran driver 580.95.05, host 157204 ran 615.71.09, and Nebius R1 ran 580.173 at 1,425 tok/s at C32, so the driver alone does not explain it (Inferred). Hypothesis: something outside the GPUs (another tenant, CPU or memory).
 - **Rule** (§29.10, `docs/03` §6): start the server, run decode at C32 for 30 s, discard the host below 1,400 tok/s. The threshold comes from two hosts; treat it as a starting rule. It applies to DCP1: DCP4 gave 1,279 tok/s at C32 on the good host (`docs/06` phase 1).
 - **Record** for every host: `nvidia-smi` (driver, power limit, PCIe link gen and width), `nvidia-smi topo -m`, `nvidia-smi topo -p2p r`, `RegistryDwords` from `/proc/driver/nvidia/params`, CPU, RAM, disk, and the 4-GPU all-reduce microbenchmark (`prepare_host.sh` and step 1 of `run_benchmark.sh` write these to `host-<engine>/host.txt`, `p2pmark-4gpu.txt` and `<OUT>/host.txt`). `docs/06` adds: the server log must contain `Using B12X PCIe all-reduce`.
 - Why topology and P2P: on host 157204, P2P was enabled without a driver override and small all-reduce took 9.1 to 9.5 us against 32.1 to 57.4 us on Nebius R1, where the override was not in effect; C1 decode was 22% higher there (Observed; the causal link is Inferred, §28.2, §29.2). The image expects driver 615.65.02 or newer (§25.1).
@@ -134,13 +151,15 @@ Runs on your machine; one instance per engine; state in `bench/vast/state/`; SSH
 cd bench/vast
 bash vast.sh create vllm <offer_id>        # or: create sglang same-machine (same machine_id)
 bash vast.sh wait vllm && bash vast.sh send vllm && bash vast.sh prepare vllm
-AGENT_LEVELS="16:900 24:900" bash vast.sh run vllm dcp1-rep
-RUN_SUFFIX=2 AGENTS_ONLY=1 AGENT_LEVELS="16:900 24:900" bash vast.sh run vllm dcp1-rep   # second run, own directory
+AGENT_LEVELS="16:900 24:1200" bash vast.sh run vllm dcp1-rep
+RUN_SUFFIX=2 AGENTS_ONLY=1 AGENT_LEVELS="16:900 24:1200" bash vast.sh run vllm dcp1-rep   # second run, own directory
 bash vast.sh status vllm                   # tails of remote logs, GPU use
 bash vast.sh fetch vllm                    # rsync to results/vast-<date>/vllm/ (RESULTS_DIR)
 bash vast.sh destroy vllm                  # only after fetch
 cd .. && python3 summarize.py --price <US$/h> --needle-ref 3/500 ../results/vast-<date>/vllm/vast-vllm-dcp1-rep
 ```
+
+The DCP1 run on host 157204 used 1,200 s for 24 agents (`argv` of `agentes-24.json`); `docs/06` phase 2 writes `24:900`. Keep the duration the run you compare against used. Details of every command: `references/vast-workflow.md`.
 
 Arms (`run <engine> <arm>`, Observed in `vast.sh`): `vllm/r1` (DCP4), `vllm/dcp1`, `vllm/dcp1-rep`, `vllm/r1-rep` (agents only), `vllm/lmcache` and `vllm/lmcache-control` (DCP4, agents only, `AGENT_THINK` 20-60), `vllm/lmcache-dcp1` and `vllm/lmcache-dcp1-control` (DCP1, `KV_CACHE_BYTES` default 30064771072, about 3.5M tokens, `AGENT_THINK` 60-100), and SGLang arms (`ormandj`, `nvfp4`, `nvfp4-1d00738`, `nvfp4-marlin`, `nvfp4-marlin-clean`, `nvfp4-fp32ssm`, `nvfp4-nospec`). `run` forwards `AGENT_LEVELS`, `AGENTS_ONLY`, `NEEDLE_RUNS`, `STOP_ON_GATE_FAIL` and sets `LAUNCH_MODE=direct`. Other knobs: `DISK_GB`, `SGLANG_IMAGE`, `CHECKPOINT` (`fp8`, `nvfp4`, `nvfp4-1d00738`), `SKIP_CHECKPOINT=1` (validate without download). Remote results land in `bench/results/vast-<engine>-<arm>`. Arms renamed in the translation: `lmcache-controle`, `lmcache-dcp1-controle`, `nvfp4-marlin-limpo` and `nvfp4-semspec` are now `lmcache-control`, `lmcache-dcp1-control`, `nvfp4-marlin-clean` and `nvfp4-nospec`; result directories in the archive keep the old names.
 
@@ -155,7 +174,13 @@ python3 bench/llm-inference-bench/llm_decode_bench.py --port 8000 --concurrency 
   --duration 30 --max-tokens 8192 --skip-prefill --output qual-c32.json
 ```
 
-Discard the host below 1,400 tok/s (DCP1). The JSON field name for aggregate tok/s is not recorded in our sources; read it from the log or the file.
+Discard the host below 1,400 tok/s (DCP1). The aggregate tok/s is `results[].aggregate_tps` in the output JSON (also `summary_table["0"]["32"]`):
+
+```bash
+python3 -c "import json;print([round(r['aggregate_tps']) for r in json.load(open('qual-c32.json'))['results']])"
+```
+
+Also read `p2pmark-4gpu.txt` from `prepare`: host 48294 already showed 13.8 to 21.7 us small all-reduce against 8.4 to 9.3 us on 157204 before any server started (`examples/host-48294-qualification-failure.md`).
 
 ### Judge a gate-only run
 
@@ -172,9 +197,9 @@ The arm fails if the printed p is below 0.05. Repeat for `needle-c16.json`.
 
 `bench/test_summarize.py` has 24 tests, no GPU needed: `cd bench && uvx pytest test_summarize.py` (`docs/03` §5).
 
-### Report a result
+### Write up a result
 
-Each result line in `docs/` or a report carries:
+Full template with the reason for each field: `references/result-writeup-template.md`; filled-in example: `examples/writeup-dcp1-run1.md`. Each result line in `docs/` or a report carries:
 
 - the evidence label, and whether it is the real model;
 - engine, image tag, checkpoint and revision, profile (TP, DCP, MTP, cache mode);
@@ -200,6 +225,8 @@ Example of the expected form: "vLLM DCP1, 24 agents inside the SLO, TTFT p95 4.9
 ## Pitfalls we hit
 
 - **Cold first-turn queue.** All agents start together with 40K to 100K tokens. With 7-minute levels no turn left the queue and 8 agents "failed" at 33 s TTFT p95. Fixed by the steady-state rule and per-level durations (`8:600 16:900 32:1500`) (§29.3).
+- **Mixed attempts in one directory.** `vast-vllm-r1/agentes-8.json` and `agentes-24.json` are byte-identical to the files in `vast-vllm-r1/agentes-7min/` (420 s levels), while `agentes-16.json` and `agentes-32.json` come from the 900 s and 1,500 s attempt (Observed, `metadata.settings.agents_duration` and md5). So DCP4 "8 agents passed" comes from a 420 s level, and DCP4 at 24 was attempted (short sample, 0 steady turns), not "not measured" as `docs/03` says. Check `agents_duration` of every file before quoting a row.
+- **Missing 256K prefill.** `run_benchmark.sh` asks for `8k,32k,128k,256k`; every `prefill.json` in the archive has only 8K, 32K and 128K. Cause Unknown.
 - **Single runs.** DCP4 at 16 agents passed by 0.23 s and failed the repeat (§29.6). SGLang FP8 needle went 117/120 then 119/120 on two runs (§29.1).
 - **`run_benchmark.sh` used to stop on any needle error.** Until 2026-11-12, `STOP_ON_GATE_FAIL=1` stopped when any run in `needle.json` or `needle-c16.json` was wrong (the old 120/120 rule), and `NEEDLE_RUNS` defaulted to 120. At the reference's 0.6% error rate a good arm would come out clean only about half the time at 120 runs (Inferred: 0.994^120 is about 0.49), and the DCP1 run of 2026-11-11 (3/120 and 1/120) would have stopped. Since 2026-11-12 the script calls `passes_needle` of `summarize.py` with `NEEDLE_REF` (default 3/500), and `NEEDLE_RUNS` defaults to 500 in `run_benchmark.sh` and `vast.sh`. Check that your copy of the harness has this before trusting `STOP_ON_GATE_FAIL`.
 - **Overloaded LMCache test.** 48 agents with 20 to 60 s think time and 5 GiB of KV per GPU: queue time became activity, all sessions competed for HBM and both arms collapsed (391 s / 502 s TTFT p50 / p95 with LMCache). It measured overload, not restore TTFT. 90 restores waited for GPU space and 9 gave up after 133 to 185 s (§29.8). The corrected arms `lmcache-dcp1` and `lmcache-dcp1-control` have not run.
@@ -220,6 +247,7 @@ Example of the expected form: "vLLM DCP1, 24 agents inside the SLO, TTFT p95 4.9
 5. What is the restored-turn TTFT with LMCache, without a queue (the corrected §29.8 test)?
 6. Should the bench save interrupted levels? The fix is listed (§29.9 item 3) and not done.
 7. Is 1,400 tok/s the right threshold? It comes from two hosts, measured with DCP1.
+8. Why does the 256K prefill cell never appear in `prefill.json`?
 
 ## Sources
 

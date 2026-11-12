@@ -18,6 +18,23 @@ Nothing in this skill has run on AWS. Every number comes from Nebius (R1, 2026-1
 - Qualifying a new host or instance type (for example the first `g7e.24xlarge`).
 - A server starts slowly, decodes slowly, crashes, or its KV budget looks wrong.
 
+## Files in this skill
+
+Read SKILL.md first. Open the others when the task needs the detail.
+
+| File | Read it when |
+|---|---|
+| [`references/production-profile.md`](references/production-profile.md) | You need what any env var or flag in the launch scripts does, its value and its source |
+| [`references/fork-vs-upstream.md`](references/fork-vs-upstream.md) | You weigh the fork against upstream vLLM, track upstream PRs, or recount the fork's distance from upstream |
+| [`references/startup-and-weights.md`](references/startup-and-weights.md) | A start is slow, you plan cold starts, or you size storage for weights and the JIT cache |
+| [`references/troubleshooting.md`](references/troubleshooting.md) | Something failed or is slow: slow host, P2P, driver, OOM, LMCache stalls, offline model resolution |
+| [`references/upstream-vllm-docs.md`](references/upstream-vllm-docs.md) | You need the upstream wording for an engine arg, speculative decoding, DCP, prefix caching or metrics |
+| [`examples/print-command-glm53-tp4-dcp4-mtp3.sh`](examples/print-command-glm53-tp4-dcp4-mtp3.sh) | You want the exact `docker run` the image printed (verbatim copy of the R1 file) |
+| [`examples/print-command-annotated.md`](examples/print-command-annotated.md) | You read that script for the first time or build a container spec from it |
+| [`examples/healthy-startup-log.md`](examples/healthy-startup-log.md) | You check a new server's log line by line |
+| [`examples/decode-48294-vs-157204.md`](examples/decode-48294-vs-157204.md) | You qualify a host or explain why the C32 gate exists |
+| [`examples/change-one-flag-walkthrough.md`](examples/change-one-flag-walkthrough.md) | You are about to change any flag, env var, image or revision |
+
 ## The production profile
 
 What runs today (Observed in the launch scripts and server logs, `docs/03-serving-engine-and-benchmarks.md` section 3):
@@ -27,12 +44,12 @@ What runs today (Observed in the launch scripts and server logs, `docs/03-servin
 | Image | `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` |
 | vLLM build in the image | `0.1.dev21830+g8244d1c44` (commit `8244d1c44348ae8a5bbfc9f1b607021652283ed4`, branch `dev/karmic-kraken`) |
 | Image contents | CUDA 13.4.1, torch `2.14.0a0` (NVIDIA), NCCL 2.30.7, FlashInfer `0.7.1+lil...g6023d031be8e`, LMCache `0.5.3.dev453+lil...g8ef537d6481b`; env `CUDA_DRIVER_VERSION=615.65.02` (§25.1) |
-| Image digest | Unknown: not recorded in the sources. Record it on first pull |
+| Image digest | `sha256:c14295c214f6126f0fc362f3e6073933a2125de9fc35b938e43842a5dcc40e38` (Observed, version manifest in the project research notes, not published). Check it on every pull |
 | Checkpoint | `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be` |
 | Launcher | `python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie`, run from `/opt/lil` inside the image |
 | Parallelism | TP4 on 4 GPUs; `--decode-context-parallel-size 4` (launcher default `DCP=4`) or `1` |
 | Speculation | MTP, `num_speculative_tokens` 3 |
-| Extra env we add | `NCCL_NET_PLUGIN=none`, `HF_HUB_OFFLINE=1` |
+| Extra env we add | `NCCL_NET_PLUGIN=none` (the printed command has `spcx`), `HF_HUB_OFFLINE=1` |
 | Cache mode | `CACHE_MODE=vram` (HBM prefix cache) or `CACHE_MODE=lmcache` (adds the LMCache server, L1 in `/dev/shm`) |
 | All-reduce | B12X PCIe one-shot on the `tp` group, confirmed in the log on every host |
 | MoE | W4A16, `B12X_W4A16_FP32_TOPK_WEIGHTS=1`, `VLLM_B12X_MOE_FP4_FORCE_A16=1` |
@@ -48,7 +65,7 @@ Scripts that reproduce it:
 ### 1. The engine is the local-inference-lab vLLM fork (decided 2026-11-12, §29.7)
 
 - **Speed on SM120 comes from fork-only code.** B12X kernels for attention, MoE, dense, KDA and PCIe all-reduce are absent from upstream vLLM 0.32.0 (Observed, §10.3).
-- **Prefill lanes are fork-only.** `--prefill-compute-share`, `--max-parallel-prefills` and `--prefill-schedule-interval` have 0 hits in upstream `vllm/config/scheduler.py` v0.32.0 (Observed, §10.3). In R1, prefill under active decode ran at about 4.1 thousand tok/s, 40% of 10.3 thousand, matching `--prefill-compute-share 0.4` with one lane, and decode stayed protected at about 15 ms per token while 8 requests of 128K prefilled (Observed, §12.2).
+- **Prefill lanes are fork-only.** `--prefill-compute-share`, `--max-parallel-prefills` and `--prefill-schedule-interval` have 0 hits in upstream `vllm/config/scheduler.py` v0.32.0 (Observed, §10.3). Upstream's current docs now list `--prefill-schedule-interval`, not the other two (Reported, `references/upstream-vllm-docs.md`). In R1, prefill under active decode ran at about 4.1 thousand tok/s, 40% of 10.3 thousand, matching `--prefill-compute-share 0.4` with one lane, and decode stayed protected at about 15 ms per token while 8 requests of 128K prefilled (Observed, §12.2).
 - **Quality.** The QAD checkpoint passes the gate only here; SGLang cannot load it (CSF scales) and failed with every 4-bit checkpoint it can load (Observed, §29.5).
 - **Sessions.** SGLang FP8 served 8 agents inside the SLO against 16 for the fork with DCP4, because it had 1.05 million KV tokens against 23.1 million (Observed, §29.1, §29.2).
 - **What would reopen it:** DCP for DSA on SM120 in SGLang (PR #39215), SGLang loading the QAD checkpoint, Unified Memory accepting the `dsa` backend, and then at least 20% more sessions inside the SLO in two runs of ours (§29.7).
@@ -104,7 +121,7 @@ The same "4x RTX PRO 6000" offer delivered 5 times lower decode on host 48294 (C
 
 | Feature | In upstream vLLM 0.32.0? | Evidence |
 |---|---|---|
-| B12X kernels (attention, MoE, dense, KDA, PCIe all-reduce) | No | Observed, §10.3. The `local-inference-lab/b12x` repository is archived and moved into FlashInfer (§22.1) |
+| B12X kernels (attention, MoE, dense, KDA, PCIe all-reduce) | No in v0.32.0; upstream `main` gained a b12x attention backend and b12x PRs since August 2026, coverage of our path Unknown | Observed, §10.3; Reported, GitHub 2026-11-12 (`references/fork-vs-upstream.md`). The `local-inference-lab/b12x` repository is archived and moved into FlashInfer (§22.1) |
 | `--prefill-compute-share`, `--max-parallel-prefills`, `--prefill-schedule-interval` | No | Observed, §10.3 |
 | KDA path `vllm/models/glm5next/nvidia/kda.py` (Kimi-K3 base, B12X, `B12XKDARecoverSSMCommitContext`); FlashKDA built with an SM120 patch | No (absent from v0.33.0) | Observed, §26.5 |
 | LMCache fork with its own DCP (`dcp_size`, per-rank fragments); has `BlockStored`, lacks `BlockRemoved` | Separate process | Observed, extracted from the image (§25.1) |
@@ -113,7 +130,7 @@ The same "4x RTX PRO 6000" offer delivered 5 times lower decode on host 48294 (C
 
 Upstream also has, and we use: MTP, DCP, `--max-num-batched-tokens`, `--load-format instanttensor` and `ipc_cache` (Observed, §10.3).
 
-**Maintenance risk** (Observed, §13.3, §22.1, §26.5): `8244d1c443` was 409 commits ahead and 3,304 behind vLLM `main` on 2026-11-05; 3,222 behind in a later count; forked at `0f8fa53` (2026-09-16) and 2,439 behind the `v0.33.0` tag. The counts use different references and dates; recount before relying on one. More than 300 files changed. Volunteer maintainers, 316 open issues on the fork and 128 on B12X. B12X targets SM120; another GPU loses the gain. Porting an upstream feature such as FlashState means redoing about 5 thousand lines in the scheduler and cache manager, the files where the fork diverges most (effort of weeks is a Hypothesis, §26.5). Every fork update is a rebase plus requalification through the gate (§22.1).
+**Maintenance risk** (Observed, §13.3, §22.1, §26.5): `8244d1c443` was 409 commits ahead and 3,304 behind vLLM `main` on 2026-11-05; 3,222 behind in a later count; forked at `0f8fa53` (2026-09-16) and 2,439 behind the `v0.33.0` tag. Recount on 2026-11-12 (Reported, GitHub API): 409 ahead and 3,797 behind `main`, 2,439 behind `v0.33.0rc3`, 1,512 behind `v0.32.0`; `dev/karmic-kraken` has had no commit since `8244d1c44` (2026-10-15). Commands in `references/fork-vs-upstream.md`. More than 300 files changed. Volunteer maintainers, 316 open issues on the fork and 128 on B12X. B12X targets SM120; another GPU loses the gain. Porting an upstream feature such as FlashState means redoing about 5 thousand lines in the scheduler and cache manager, the files where the fork diverges most (effort of weeks is a Hypothesis, §26.5). Every fork update is a rebase plus requalification through the gate (§22.1).
 
 Our own fork `paulohenriquevn/vllm` (baseline tag `baseline-rtx-20261105`, working branch `lab/dev`) has commit `66d49ef`: it reads `/proc/driver/nvidia/params`, warns with the fix line when `ForceP2P` is missing, and with `VLLM_PCIE_REQUIRE_P2P_OVERRIDE=1` disables the B12X all-reduce and falls back to NCCL. 12 CPU tests pass; it never ran on a real server and is not in the production image (Observed, §23.4).
 
@@ -135,7 +152,7 @@ The weights must already be in the Hugging Face cache, because `HF_HUB_OFFLINE=1
 
 Flags in the production command worth knowing (Observed in `bench/server-vllm-direct.sh`): `--tensor-parallel-size 4`, `--decode-context-parallel-size 4`, `--dcp-kv-cache-interleave-size 4`, `--kv-cache-dtype fp8`, `--block-size 256`, `--gpu-memory-utilization 0.96`, `--max-model-len 1048576`, `--max-num-seqs 32`, `--max-num-batched-tokens 4096`, `--prefill-compute-share 0.4`, `--max-parallel-prefills 1`, `--prefill-schedule-interval 1`, `--enable-prefix-caching`, `--mamba-cache-mode align`, `--recurrent-checkpoint-policy request_boundaries`, `--quantization modelopt_mixed`, `--attention-backend B12X`, `--moe-backend b12x`, `--linear-backend b12x`, `--load-format instanttensor`, `--no-enable-flashinfer-autotune`, `--speculative-config '{"method":"mtp",...,"moe_backend":"marlin","attention_backend":"B12X","num_speculative_tokens":3,"revision":"dec48abd..."}'`, `--reasoning-parser glm45`, `--tool-call-parser glm47`, `--default-chat-template-kwargs '{"reasoning_effort":"max","clear_thinking":false}'`, `--override-generation-config '{"temperature":1.0,"top_p":0.95}'`, `--served-model-name GLM-5.3-Flash-NVFP4`.
 
-The reasons for most of the 90 env vars and many flags are not documented in our sources; they are the image's own profile. Copy the full set from the script and change nothing you cannot gate. Documented reasons: `VLLM_ENABLE_PCIE_ALLREDUCE=1` and `VLLM_PCIE_ALLREDUCE_BACKEND=b12x` select the B12X all-reduce (setting the first to 0 is the `ar-nccl` test variant, §23.2); the MoE A16 vars keep quality (model skill); `--max-num-batched-tokens 4096` follows the fork's recipe (§10.3). Why `NCCL_NET_PLUGIN=none` is needed is Unknown: the sources only record that R1 and every later run used it.
+Most of the 90 env vars are the image's own profile. Their meanings, read from the fork source at our commit, are in `references/production-profile.md`; a few remain Unknown. Copy the full set from the script and change nothing you cannot gate. Documented reasons: `VLLM_ENABLE_PCIE_ALLREDUCE=1` and `VLLM_PCIE_ALLREDUCE_BACKEND=b12x` select the B12X all-reduce (setting the first to 0 is the `ar-nccl` test variant, §23.2); the MoE A16 vars keep quality (model skill); `--max-num-batched-tokens 4096` follows the fork's recipe (§10.3). Why `NCCL_NET_PLUGIN=none` is needed is Unknown: the sources only record that R1 and every later run used it.
 
 ### Check the host before starting the server
 
@@ -146,7 +163,7 @@ cat /proc/driver/nvidia/params | grep -E 'RegistryDwords'   # P2P override state
 nvidia-smi                     # record the driver version
 ```
 
-`bench/vast/prepare_host.sh` records driver, topology and P2P and runs the all-reduce microbenchmark between the 4 GPUs before any server starts (§28.1). Reference values: on Vast 157204, P2P was OK between all 4 GPUs without any override, and the B12X PCIe all-reduce took 9.1 to 9.5 µs at 256 B to 2 KiB, against 32.1 to 57.4 µs on the Nebius R1 host where the override was not in effect (Observed, §28.2).
+`bench/vast/prepare_host.sh` records driver, topology and P2P and runs the all-reduce microbenchmark between the 4 GPUs before any server starts (§28.1). Reference values: on Vast 157204, P2P was OK between all 4 GPUs without any override, and the p2pmark custom all-reduce took 8.4 to 9.3 µs at 256 B to 2 KiB (§28.2 says 9.1 to 9.5 and calls it the B12X all-reduce; p2pmark measures its own implementation, not the B12X kernel inside vLLM, §23.1), against 32.1 to 57.4 µs on the Nebius R1 host where the override was not in effect (Observed, §28.2). On the slow host 48294 the same rows were 13.8 to 21.7 µs.
 
 If P2P is not effective (Nebius case), the driver override that fixed the microbenchmark is the module parameter line (Observed, NOTAS.md 2026-11-06, §25.2):
 
@@ -223,9 +240,9 @@ Fork switches present but never measured by us (§23.3): `VLLM_B12X_BF16_GEMV=1`
 ## Pitfalls we hit
 
 - **Decode at half the reported speed on Nebius.** C1 119.8 against 238 tok/s reported by the wiki (Observed, §12.2). The custom all-reduce was selected (hypothesis refuted), but the driver P2P override was off and the all-reduce lost to NCCL from 4 KiB (Observed, §23.1, §25.2). On Vast 157204, with P2P working out of the box, C1 was 145.6 tok/s, 22% higher (causal link Inferred, §29.2). Full cause still Unknown.
-- **A host 5 times slower with the same software.** Host 48294: decode 108 / 298 / 350 / 296 tok/s at C1 / C8 / C16 / C32, startup 1,084 s against 260 s, only 2 or 3 requests running at 16 agents with 5% of KV used, GPUs at about 116 W. Same topology, links at Gen5 x16, same all-reduce. Cause Unknown; Hypothesis: another tenant, CPU or memory (§29.10). Fix: the C32 host gate.
-- **LMCache does not raise concurrent capacity.** Restored KV must return to HBM; 90 restores waited for GPU capacity and 9 gave up after 133 to 185 s and recomputed (Observed, §29.8). Size HBM for active sessions; LMCache serves idle ones. The `lmcache` mode also refuses `--print-command` because it starts a second process.
-- **Per-turn recompute tail.** Even with 97% of the prompt cached, each turn recomputes 3,200 to 3,800 tokens (p50) and 5,300 to 5,900 (p90); that tail drives TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32 (Observed, §29.2).
+- **A host 5 times slower with the same software.** Host 48294: decode 108 / 299 / 351 / 298 tok/s at C1 / C8 / C16 / C32, startup 1,084 s against 260 s, weights loaded in 462 s against 25 s, only 2 or 3 requests running at 16 agents with 5% of KV used, GPUs at about 116 W. Links at Gen5 x16 like the good host, but the NUMA layout, OS, kernel and driver differed and the p2pmark small all-reduce was 1.5 to 2.4 times slower, so §29.10's "same topology, same all-reduce" is too strong. Cause Unknown; Hypothesis: another tenant, CPU, memory or storage (§29.10). Fix: the C32 host gate. Details: `references/troubleshooting.md`, `examples/decode-48294-vs-157204.md`.
+- **LMCache does not raise concurrent capacity.** Restored KV must return to HBM; 90 restores waited for GPU capacity and 9 gave up and recomputed after waiting 60.0 to 185.3 s (Observed in the log; §29.8 says 133 to 185 s). Size HBM for active sessions; LMCache serves idle ones. The `lmcache` mode also refuses `--print-command` because it starts a second process.
+- **Per-turn prefill of new tokens.** Even with 97% of the prompt cached, each turn prefills 3,200 to 3,800 tokens (p50) and 5,300 to 5,900 (p90). These are the new tool block plus 1 token in 100% of vLLM turns, not a cache loss (Observed, raw `agentes-*.json`; §29.2 called it a hybrid-cache tail, which is wrong). New-token prefill plus queueing moves TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32 (Inferred). See `prefill-decode-tuning/examples/recompute-split.md`.
 - **Image pull is slow regardless of disk:** 7 min 30 s for 12.9 GB compressed on both a 104 MiB/s and a 1.9 GB/s disk; the bottleneck is the registry, decompression or layer concurrency (Observed, §17.2). Mirror the image close to the fleet.
 - **Docker stored images in containerd, outside `data-root`,** so an image pulled on a CPU VM was lost; fix with `features.containerd-snapshotter=false` in `daemon.json` (Observed, §25.3).
 - **A wait loop that matched itself.** `pgrep -f name` inside an `ssh` command containing `name` kept a GPU VM up for 6 h 8 min with no result (about US$ 88, Inferred, §25.3). Wait on the server log or health endpoint and fail when the log is empty or shows an error.
@@ -242,8 +259,10 @@ Fork switches present but never measured by us (§23.3): `VLLM_B12X_BF16_GEMV=1`
 4. Decode all-reduce message size: §23.1 says 8 to 64 KiB, §25.2 says 8 to 56 KiB, §28.2 says 256 B to 2 KiB. It decides which microbenchmark row predicts decode.
 5. Restart time with a persisted JIT cache on a fresh machine (target below 5 minutes, never measured).
 6. Whether the LMCache tier earns its place: the corrected test (DCP1, KV cut so active sessions fit, about 48 agents thinking 60 to 100 s) is defined in `vast.sh` and has not run.
-7. Image digest, rebuild from source, and the licences of `blackwell-llm-docker` and the QAD checkpoint.
-8. Why `NCCL_NET_PLUGIN=none` is required.
+7. Rebuild from source, and the licences of `blackwell-llm-docker` (none declared) and the QAD checkpoint (`lil-license-1.0`, see `glm53-flash-model`).
+8. Why `NCCL_NET_PLUGIN=none` replaced the image's `spcx`.
+9. What the six `B12X_DYNAMIC_*` split variables and `VLLM_GLM53_ONLINE_DENSE_MXFP8` do: no reader found in the fork or its FlashInfer source.
+10. The fork's Prometheus metric names: list `/metrics` on a running server before building dashboards.
 
 ## Sources
 

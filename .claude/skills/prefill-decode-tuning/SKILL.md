@@ -14,6 +14,7 @@ Conventions:
 - Evidence labels: Observed (we measured it), Reported (a named source says it), Inferred (derived, link stated), Hypothesis (to validate), Unknown.
 - "Mini" means the `glm5next` mini test model: random weights, 2 full attention layers, 1 GPU per replica, upstream vLLM 0.32.0. Mini results transfer as mechanisms, never as numbers. Every row without the word "mini" is the real model.
 - Most numbers come from one run per cell, without confidence intervals.
+- Old result files keep Portuguese names (`servidor.log`, `agentes-16.json`, `concorrencia`); the harness writes English names today.
 
 ## When to use
 
@@ -22,6 +23,20 @@ Conventions:
 - You need sessions per replica from measured rates (capacity planning, fleet size).
 - Many long sessions start at once: start of the workday, a replica restart, a cell failover.
 - Someone proposes P/D disaggregation, NIXL KV transfer, or separate GPU types for prefill and decode, including on AWS with EFA.
+
+## Index
+
+| File | Read it when |
+|---|---|
+| [references/cost-model.md](references/cost-model.md) | you need a prefill or decode rate, or want to estimate sessions per replica with the two-ceiling formula |
+| [references/scheduler-flags.md](references/scheduler-flags.md) | you change a scheduler, cache or MTP flag, or an upstream doc or fork PR seems to contradict our profile |
+| [references/pd-disaggregation.md](references/pd-disaggregation.md) | someone proposes P/D, NIXL, separate GPU types, or EFA as a reason to revisit them |
+| [references/agent-workload.md](references/agent-workload.md) | you pick `AGENT_*` values, use a capacity formula, or need the coding-agent traffic shape and its sources |
+| [examples/decode-and-prefill-json.md](examples/decode-and-prefill-json.md) | you read a `decode.json` or `prefill.json`, or qualify a host |
+| [examples/agent-levels.md](examples/agent-levels.md) | you read `summarize.py` output, or want the steady-state load of a level |
+| [examples/cold-first-turn-queue.md](examples/cold-first-turn-queue.md) | many long sessions start at once, or a level fails before steady state |
+| [examples/recompute-split.md](examples/recompute-split.md) | you look at re-prefilled tokens per turn, or someone proposes FlashState |
+| [examples/pd-bench-results.md](examples/pd-bench-results.md) | you need the R1 interference rows or the mini P/D files, or want to run `pd_bench` |
 
 ## Decisions and why
 
@@ -65,7 +80,7 @@ The reference without these flags: upstream vLLM on one B300, no MTP, default ba
 
 Why keep them: the SLO asks for at least 30 tok/s per stream. 15 ms per token is about 66 tok/s (Inferred, arithmetic), so decode stays inside the SLO while a burst of long prompts is being prefilled. The price is TTFT for cold prompts and serialized prefill. The community wiki describes these flags as the fork's answer to the same interference problem (Reported, rtx6kpro, §10.3).
 
-The meaning of `--prefill-schedule-interval` is not documented in the sources (Unknown).
+The fork's PRs define the compute share (#664, off unless set) and the lanes (#664, one lane by default; `auto` resolves to `min(4, max_num_seqs)`); the GLM-5.3 profile turned the 0.4 share on in blackwell-llm-docker #150, which reported decode during a 32K prefill rising from about 61 to about 410 tok/s while that prompt's TTFT doubled (Reported, read 2026-11-12, URLs in `references/scheduler-flags.md`). `--prefill-schedule-interval` has no definition in the sources; the fork only requires it to be 1 for the fairness engines (Reported, #625).
 
 ### 3. `--max-num-batched-tokens` is 4096; lowering it is the first lever against an ITL tail, before P/D
 
@@ -80,17 +95,19 @@ The meaning of `--prefill-schedule-interval` is not documented in the sources (U
 - MTP costs KV. On one B300 with upstream vLLM, MTP plus CUDA graphs took 43% of the KV pool: 4,807,959 tokens without, 2,717,737 with (11.6 GiB) (Observed, §12.3). The KV cost of MTP alone on the RTX fork was not measured (Unknown).
 - Structured output with MTP: vLLM fork issue #726 (grammar not applied to MTP draft rows under async scheduling) is closed and its fix #931 is in the image (Observed, §25.1). A test with DCP4, `tool_choice` `auto` and `required` is still pending (test E7, §17.6).
 
-### 5. The per-turn re-prefill tail is what moves TTFT p95 as agents are added
+### 5. Re-prefilled tokens per turn are new tool input; on the vLLM fork there is no state tail to remove
 
 Observed (§29.2): in every arm, each cached turn re-prefilled 3,200 to 3,800 tokens at p50 and 5,300 to 5,900 at p90, with about 97% of the prompt served from cache. On vLLM DCP4 the TTFT p95 of cached turns went from 3.37 s at 8 agents to 4.77 s at 16 and 6.08 s at 32 (Observed, `docs/03-serving-engine-and-benchmarks.md` §2.1).
 
-Why it drives p95 (Inferred): these tokens go through the single prefill lane at about 4.1k tok/s while decode is active, so one turn costs about 0.8 to 1.4 s of prefill, and with more agents the turns queue behind each other in that one lane.
+What the turn logs show (Observed, 2026-11-12, `examples/recompute-split.md`): on the vLLM fork, DCP4 at 8, 16 and 32 agents and DCP1 at 16 and 24, re-prefilled tokens minus the new tool block is exactly 1 token at p10, p50 and p90. The bench draws the tool block uniformly from 1K to 6K tokens (`AGENT_TOOL=1k-6k`, `k` = 1,024, read in `llm_decode_bench.py`), so the 3.4K median is the new input itself. SGLang (ormandj profile) shows a real tail: 116 tokens at p50, 230 at p90.
 
-What the sources say causes it: vLLM keeps recurrent KDA state only at block boundaries (`align` mode), so each turn recomputes the end of the previous one (§26.2, §26.5). Our profile runs `--mamba-cache-mode align` and `--block-size 256` (Observed in the script). SGLang's default hybrid mode has the same limit (Observed in code, §27.1).
+Why: the fork runs `--recurrent-checkpoint-policy request_boundaries`, and every server log prints `Request-boundary recurrent checkpoint caching is enabled. Supported chat requests retain leading instructions, the complete prompt, and the response endpoint.` (Observed). The previous prompt and the whole previous response come back from cache. This replaces the journal's reading that `align` mode recomputes the end of each turn (§26.2, §26.5); see Pitfalls.
 
-A caveat the sources do not state (Inferred, by us): the metric is prompt tokens minus cached tokens, and the agent scenario adds 1K to 6K tool tokens per turn (§27.3, `AGENT_TOOL=1k-6k` in `bench/run_benchmark.sh`). If the bench draws that range uniformly, its median is 3.5K and its p90 5.5K, close to the observed numbers. Then most of the 3K to 6K is new input that must be prefilled anyway, and the avoidable state tail is smaller. The bench's sampling distribution was not read. §26.3 asks for exactly this measurement before any FlashState port.
+Consequences (Inferred):
 
-The engine fix is FlashState (saves recurrent state at any position). Porting it to our fork means redoing about 5,000 lines in the scheduler and cache manager, the files where the fork diverges most; the effort estimate of weeks is a Hypothesis (§26.5). It is priority 4 of 4 (§26.4).
+- FlashState would remove nothing per turn on the fork. Its port (about 5,000 lines, effort a Hypothesis, §26.5) stays at priority 4 of 4 (§26.4), now with no measured gain for the agent workload.
+- TTFT p95 grows with agents because tool blocks of 1K to 6K tokens queue in the single prefill lane at about 4.1k tok/s with decode active (0.25 to 1.5 s each). Steady-state prefill demand was only 857 to 1,557 tok/s (Observed, `examples/agent-levels.md`), well below the 4.1k rate: the failing levels were latency bound, not prefill-throughput bound.
+- Caveat: the bench sends token IDs, not chat messages. A real agent whose chat template re-renders earlier turns could break the request-boundary match (Hypothesis, untested).
 
 ### 6. Expect a cold first-turn queue whenever long sessions start together
 
@@ -106,28 +123,18 @@ Mitigations in the design, none tested on the real model: prefix affinity and si
 
 ### 7. Do not start with P/D disaggregation
 
-What we tested, on the mini only (Observed, §9.2, data in `f3/resultados/pd-20261105/`): 1 prefill + 1 decode replica with NIXL over TCP against 2 aggregated replicas, same 2 GPUs, cold unique 17,408-token prompts, output 128.
-
-| | Aggregated c8 | P/D 1P1D c8 | Aggregated c32 | P/D 1P1D c32 |
-|---|---|---|---|---|
-| Requests per second | 8.39 | 5.01 | 12.81 | 6.94 |
-| TTFT p50 / p95 | 0.21 / 0.50 s | 1.28 / 1.92 s | 0.34 / 1.62 s | 3.50 / 6.04 s |
-| TPOT p50 / p95 | 4.9 / 8.2 ms | 3.1 / 3.5 ms | 14.1 / 32.5 ms | 4.4 / 19.3 ms |
-
-P/D worked on the hybrid KDA + MLA mini (logprob differences up to 0.0235, the same order as cache on against cache off). It smoothed TPOT and cut throughput by about 46%, because throughput was bound to the single prefill GPU while the decode GPU sat nearly idle. The mini's decode costs almost nothing, so this shows the mechanism, not the real-model outcome (Inferred, §9.2). 2P1D was not tested. Where the extra TTFT comes from is Unknown.
+What we tested, on the mini only (Observed, §9.2, `f3/resultados/pd-20261105/`): 1 prefill + 1 decode replica with NIXL over TCP against 2 aggregated replicas on the same 2 GPUs, cold 17,408-token prompts. P/D worked on the hybrid KDA + MLA mini (logprob differences up to 0.0235, the same order as cache on against off) and smoothed TPOT (p95 32.5 to 19.3 ms at c32), but cut requests per second about 46% (12.81 to 6.94) and raised TTFT p50 from 0.34 to 3.50 s. The mini's decode costs almost nothing, so this shows the mechanism, not the real-model outcome (Inferred).
 
 Reasons not to start with it:
 
-- vLLM docs: disaggregated prefill does not improve throughput; it tunes TTFT and ITL separately (Reported, KV projects report, doc 04 §5.2).
-- The llm-d GLM-5.2 gains came from CPU offload plus MTP, not from P/D, and that sweep had no matched aggregated control (Reported, doc 04 §5.2).
-- With about 96% prefix reuse the new prefill per turn is small, which is the regime where prefilling on the decode replica is preferred (Inferred, doc 04 §5.2).
-- The replica is already 4 GPUs; P/D doubles the smallest useful deployment (Inferred, §3).
-- P/D shrinks the KV pool per GPU (Inferred, doc 04 §5.2).
-- The fork's prefill share already protects decode from long prefills (decision 2), which is the main thing P/D would buy.
+- Upstream vLLM: "Disaggregated prefill DOES NOT improve throughput"; it tunes TTFT and ITL separately (Reported, `https://docs.vllm.ai/en/latest/features/disagg_prefill/`, read 2026-11-12).
+- The llm-d GLM-5.2 gains came from CPU offload plus MTP; their P/D sweep had no matched aggregated control (Reported, doc 04 §5.2).
+- The fork's prefill share already protects decode (decision 2), and our agent levels failed on TTFT, which P/D worsens unless prefill capacity is added (Inferred).
+- A replica is already 4 GPUs; P/D doubles the smallest deployment and shrinks the decode-side KV pool (Inferred, §3, doc 04 §5.2).
 
-What would justify it: a measurement on the real model, with the fork's flags, that shows TPOT degraded by long prefills, and NIXL working with the real model. Try a smaller `--max-num-batched-tokens` first. If P/D is adopted, compare P and D on the same GPU type before mixing types; mixing SM120 and SM100 needs matching KV layouts (Hypothesis, untested, §3).
+What would justify it: on the real model with the fork's flags, TPOT or ITL above the SLO caused by long prefills after a smaller `--max-num-batched-tokens` was tried, NIXL working with the KDA state, and a P:D ratio sweep against a matched aggregated control priced in sessions per US$/h.
 
-AWS changes one input. `g7e.8xlarge` and larger list EFA (Observed in AWS docs, `docs/05-capacity-cost-and-providers.md`), and EFA gives RDMA between instances. On Nebius the RTX VMs had no RDMA, and llm-d calls NIXL over TCP "extremely slow, for local development" (Reported, §3). So EFA reopens P/D and P2P KV transfer, but nothing was tested on AWS or anywhere else with EFA (Unknown, `docs/06-aws-implementation-plan.md` open question 4).
+AWS: EFA removes the "no RDMA" problem we had on Nebius. GPUDirect RDMA is listed for `g7e.12xlarge` and larger but not `g7e.8xlarge`, and the NIXL libfabric plugin requires it (Reported, AWS EFA docs and NIXL README, read 2026-11-12). Nothing was tested with EFA (Unknown). Setup details, transfer options and sources: `references/pd-disaggregation.md`.
 
 ## How to
 
@@ -210,19 +217,21 @@ Use the two-ceiling formula in decision 1 with P from your trace (new tokens per
 - `nohup ... &` inside SSH held the session until the arm finished; the harness now uses `setsid -f` (§29.3).
 - The §16.4 capacity table used only the decode ceiling and a "7,800 new tokens per turn" figure attributed to the llm-d blog, which publishes p50 632, p90 3,735 and p99 148K token growth instead (§17.2).
 - A tail latency was blamed on routing affinity before the run order was controlled; it was a cold start. Warm up and discard before every A/B, and do not run arms in a fixed order (§9.1).
+- The journal (§26.2, §26.5, §29.2) calls the 3K to 6K re-prefilled tokens per turn a "hybrid cache tail"; `docs/01`, `docs/03` and the other skills said the same until they were corrected on 2026-11-12. On the vLLM fork it is the bench's new tool block plus 1 token (Observed, 2026-11-12, `examples/recompute-split.md`). Split re-prefilled tokens into new input and tail before blaming the cache.
+- The bench's default `--sched-request-timeout` is 600 s and `run_benchmark.sh` does not override it. Late cold first turns time out and are resent cold after 5 s, which kept the §29.8 LMCache run in its cold phase (Observed in `llm_decode_bench.py`; see the `kv-cache-tiers` skill).
 - On the mini P/D test, the vLLM recipe's `VLLM_KV_CACHE_LAYOUT=HND` failed on SM120 (`valid layouts: ['BLHNC']`), and UCX tried the RDMA device `mlx5_0` and failed; `UCX_NET_DEVICES=eth0` with `UCX_TLS=tcp,cuda_copy` worked (§9.2).
 - An interrupted agent level leaves no JSON: `llm_decode_bench.py` only writes finished scenarios (§29.9).
 
 ## Open questions
 
 1. Does a smaller `--max-num-batched-tokens` reduce the ITL tail on the fork with the prefill share on, and what does it cost in TTFT? (Unknown, never measured.)
-2. How much of the 3K to 6K re-prefilled tokens per turn is avoidable state tail and how much is new tool input? (Unknown; §26.3 proposes the measurement.)
+2. Does the 1-token tail hold for a real agent that sends chat messages through the template instead of token IDs? (Unknown; the bench answered the §26.3 question for token IDs only.)
 3. Is decode still flat with context above 128K? (Unknown.)
 4. What does MTP cost in KV on the RTX fork? (Unknown; the 43% figure is B300 upstream with CUDA graphs.)
 5. DCP1 or DCP4: a second DCP1 run at 16 and 24 agents on a qualified host is pending (§29.9, AWS phase 2).
 6. Output length O of GLM-5.3-Flash in a real agent loop (test E9, §17.6).
 7. Does P/D with NIXL work on the real model, and does it ever beat aggregated serving at a tuned P:D ratio? Does EFA on `g7e` make NIXL fast enough? (Unknown, untested anywhere.)
-8. Fork switches not yet explored (§23.3): `VLLM_SCHEDULER_UNCAP_PREFILL_ONLY_STEPS=1` (#880, prefill), a prefill work limit under decode (#862, parameter name Unknown), `VLLM_B12X_BF16_GEMV=1` (#873, decode).
+8. Fork switches not yet explored (§23.3): `VLLM_SCHEDULER_UNCAP_PREFILL_ONLY_STEPS=1` (#880, prefill), a prefill token cap under contention (#862, parameter name Unknown), `VLLM_B12X_BF16_GEMV=1` (#873, decode), size-classed prefill lanes (#1048, open). PR summaries in `references/scheduler-flags.md`.
 9. What `--prefill-schedule-interval` does (Unknown in the sources).
 
 ## Sources
@@ -233,4 +242,5 @@ Use the two-ceiling formula in decision 1 with P from your trace (new tokens per
 - `docs/01-product-demand-and-slo.md` (SLO and workload shape)
 - `docs/05-capacity-cost-and-providers.md` and `docs/06-aws-implementation-plan.md` (G7e, EFA, phase 2)
 - `ARQUITETURA.md` §3, §9.2, §9.3, §10.1, §10.3, §10.4, §12.2, §12.3, §16.4, §17.2, §17.3, §17.4, §17.5, §20, §26.2 to §26.5, §27.1, §27.3, §29.1 to §29.3, §29.6, §29.9, §29.10
-- Harness: `bench/run_benchmark.sh`, `bench/summarize.py`, `bench/server-vllm-dcp1-direct.sh`, `bench/vast/vast.sh`
+- Harness: `bench/run_benchmark.sh`, `bench/summarize.py`, `bench/server-vllm-dcp1-direct.sh`, `bench/vast/vast.sh`, `bench/llm-inference-bench/llm_decode_bench.py`, `router/pd/`
+- Upstream docs and PRs read 2026-11-12: listed with URLs in each reference file

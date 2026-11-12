@@ -43,7 +43,11 @@ DCP1 vs DCP4, whether the LMCache RAM tier pays off, fleet size, AWS price/quota
 | SLO, quality gate, harness, host qualification | `inference-benchmarking` | `benchmark-analyst` |
 | Demand model, fleet size, cost per session | `capacity-and-cost` | `benchmark-analyst` |
 | AWS g7e, phases, IaC decisions | `aws-g7e-deployment` | `aws-platform-engineer` |
+| Horizontal scaling, metrics, dashboards, alerts | `autoscaling-and-observability` | `aws-platform-engineer`, `kv-routing-architect` |
+| Writing docs, records, commits and reports | `writing-docs` | `evidence-reviewer` |
 | Checking claims and sources | | `evidence-reviewer` |
+
+Each skill has a `SKILL.md` entry point that links its `references/` (deep documentation, including digests of upstream docs with URLs and read dates) and `examples/` (excerpts of real results, full commands, worked calculations). Read the entry point first and open only the reference you need.
 
 Commands: `/qualify-host`, `/quality-gate`, `/summarize-run`, `/phase-check`, `/record-decision`.
 

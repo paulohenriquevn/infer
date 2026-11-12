@@ -179,7 +179,7 @@ What the documentation says (Observed in https://docs.aws.amazon.com/ec2/latest/
 
 What the repository recorded earlier (Observed on 2026-11-04 in `NOTAS.md`, not rechecked on 2026-11-12): on-demand list prices in `us-east-1` from the Price List API were US$16.57/h for `g7e.24xlarge` and US$33.14/h for `g7e.48xlarge`, about US$4.14 per GPU-hour; G7e existed in `us-east-1b`, `1c` and `1d`; our G/VT vCPU quota was 0 with a 96 vCPU on-demand request pending. §18.3 uses the same US$33.14 per 8-GPU VM, against US$14.4 at Nebius.
 
-What we do not know (Unknown as of 2026-11-12): current G7e prices and any commit discount, regional availability beyond that one read, our current quota, whether GPU P2P works inside a G7e instance (the driver override mattered on Nebius, §25.2), and whether the fork image and its expected driver run there.
+Read on 2026-11-12 (Observed in the AWS Price List files, `us-east-1`): `g7e.24xlarge` on-demand US$ 16.57/h, EC2 Instance Savings Plan US$ 10.44/h (1 year) and US$ 7.16/h (3 years, no upfront). What we do not know (Unknown as of 2026-11-12): regional availability beyond that one read, our current quota, whether GPU P2P works inside a G7e instance (the driver override mattered on Nebius, §25.2), and whether the fork image and its expected driver run there.
 
 Inferred:
 

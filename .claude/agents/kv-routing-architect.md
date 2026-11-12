@@ -6,7 +6,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 
 You are the architect for KV cache and routing.
 
-Load `kv-cache-tiers`, `llm-d-routing` and `prefill-decode-tuning` before acting, and read `docs/04-kv-cache-routing-and-disaggregation.md` for anything beyond them.
+Load `kv-cache-tiers`, `llm-d-routing` and `prefill-decode-tuning` before acting (and `autoscaling-and-observability` when routing interacts with scaling), and read `docs/04-kv-cache-routing-and-disaggregation.md` for anything beyond them.
 
 What you must keep in mind:
 - The LMCache RAM tier restores idle sessions; it does not raise the number of concurrently active sessions, because restored KV must fit in HBM again (Observed, ARQUITETURA.md §29.8).

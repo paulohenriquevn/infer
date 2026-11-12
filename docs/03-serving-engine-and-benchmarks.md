@@ -56,7 +56,7 @@ Readings:
 
 - SGLang is faster per request (decode C1 +11%, prefill about 30% shorter with FP8) but serves half the sessions with FP8, because 16 contexts of 60K to 110K tokens do not fit 1.05M tokens of KV (Observed: `full token usage: 0.99`, 20 requests queued). (§29.2)
 - With NVFP4 weights SGLang matches vLLM at 16 agents with 3 times lower TTFT, but fails quality (§2.2) and runs out of KV between 16 and 32 agents. (§29.4)
-- In every arm, each turn recomputes 3,200 to 3,800 tokens (p50) and 5,300 to 5,900 (p90) even with 97% of the prompt cached. That tail, which the hybrid KDA cache does not reuse, drives vLLM's TTFT p95 from 3.4 s at 8 agents to 6.1 s at 32. (Observed, §29.2)
+- In every arm, each turn prefills 3,200 to 3,800 tokens (p50) and 5,300 to 5,900 (p90) even with 97% of the prompt cached. These are new tokens: the agents scenario appends a tool block of 1,024 to 6,144 tokens per turn (`agent_tool` in `llm_decode_bench.py`), and on vLLM the recomputed tokens equal that new block plus 1 token in 100% of turns of every real-model run (Observed, recomputed from the `agentes-*.json` turns on 2026-11-12). The hybrid cache loses nothing; ARQUITETURA.md §26.2 and §29.2, which call it a tail the hybrid cache does not reuse, are wrong. vLLM's TTFT p95 rises from 3.4 s at 8 agents to 6.1 s at 32 because of that new prefill plus queueing (Observed, §29.2; the cause attribution is Inferred). On SGLang the extra beyond the tool block is at most one 256-token page.
 - vLLM DCP4 sits on the 5 s TTFT limit at 16 agents: it passed once with 0.23 s margin and failed the repeat. §29.6 calls 8 agents its guaranteed capacity, but level 8 passed in run 1 and was not repeated (run 2 tested only 16 and 24), so no DCP4 capacity is confirmed by two runs yet. (§29.6)
 - DCP1 is 6% to 24% faster in decode and passed 24 agents, but in one run with 0.07 s margin, and with 3.4 times less KV, which matters when idle sessions must leave HBM. (§29.6)
 
@@ -88,7 +88,7 @@ Host 48294 (Texas, datacenter, US$ 7.03/h, reliability 0.965), same image, check
 
 - Quality valid: needle 500/500 at C8 and 120/120 at C16, gsm8k 96/96 (the raw `gsm8k.json`; §29.10 says 99%).
 - Speed not valid: decode 108 / 298 / 350 / 296 tok/s at C1 / C8 / C16 / C32 (vs 154 / 696 / 1,072 / 1,578 on host 157204); 1,084 s to start vs 260 s; at 16 agents only 2 or 3 requests ran with 21 queued and 5% KV used.
-- Cause Unknown. One difference: host 48294 ran GPU driver 580.95.05, host 157204 ran 615.71.09 (the image expects 615.65.02 or newer, §25). Nebius R1 ran driver 580.173 and reached 1,425 tok/s at C32, so the driver alone does not explain 296 tok/s (Inferred). Same PCIe topology (GPU0 on the other socket), same B12X PCIe one-shot all-reduce, links at Gen5 x16; GPUs drew about 116 W during the agent run. Hypothesis: something outside the GPUs (another tenant on the 8-GPU host, CPU or memory).
+- Cause Unknown. Differences: NUMA layout, OS, weight load time (462 s) and p2pmark 1.5 to 2.4 times slower (Observed in the run's logs). Also: host 48294 ran GPU driver 580.95.05, host 157204 ran 615.71.09 (the image expects 615.65.02 or newer, §25). Nebius R1 ran driver 580.173 and reached 1,425 tok/s at C32, so the driver alone does not explain 296 tok/s (Inferred). Same PCIe topology (GPU0 on the other socket), same B12X PCIe one-shot all-reduce, links at Gen5 x16; GPUs drew about 116 W during the agent run. Hypothesis: something outside the GPUs (another tenant on the 8-GPU host, CPU or memory).
 
 ### 2.4 How the agent metric is computed
 
@@ -174,5 +174,5 @@ Arms defined in `vast.sh`: `vllm/r1`, `vllm/dcp1`, `vllm/dcp1-rep`, `vllm/r1-rep
 1. Second speed run of vLLM DCP1 at 16 and 24 agents on a host that passes qualification (§29.9).
 2. DCP1 vs DCP4 with the LMCache tier: the corrected test (DCP1, KV cut so active sessions fit and idle ones are evicted, about 48 agents thinking 60 to 100 s) is defined in `vast.sh` but has not run.
 3. Cause of the slow host 48294 (Unknown).
-4. Per-turn recompute of 3K to 6K tokens: the hybrid cache tail. A fix in the engine would cut TTFT p95 at high agent counts (§26.5 discusses FlashState).
+4. Removed on 2026-11-12: the per-turn recompute of 3K to 6K tokens is new tool content, not a cache loss, so an engine fix such as FlashState (§26.5) would not cut it.
 5. `llm_decode_bench.py` does not save an agent level that is interrupted; the LMCache control run of §29.8 has no JSON because of it.
