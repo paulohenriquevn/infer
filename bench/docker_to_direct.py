@@ -5,6 +5,9 @@ Usage: python3 docker_to_direct.py server-vllm.sh > server-vllm-direct.sh
 Meant for instances whose environment already is the image's container (Vast.ai): keeps the -e
 variables and the command, drops the docker options. The generated script expects PIDFILE and LOGFILE,
 like server-sglang.sh with LAUNCH_MODE=direct, and keeps $PORT and $GPUS as variables.
+If the command pins a checkpoint with --revision, CHECKPOINT_REVISION overrides that revision everywhere
+it appears (--revision and the speculative config), so another revision of the same repository can be
+served without editing the script.
 """
 from __future__ import annotations
 
@@ -39,10 +42,21 @@ def extract(text: str) -> tuple[dict[str, str], list[str]]:
     return envs, cmd
 
 
-def _arg(tok: str) -> str:
+def _arg(tok: str, revision: str | None = None) -> str:
     if tok in ("$PORT", "$GPUS"):
         return f'"{tok}"'
+    if revision and revision in tok:
+        return '"$REVISION"'.join(shlex.quote(part) for part in tok.split(revision))
     return shlex.quote(tok)
+
+
+def _revision(cmd: list[str]) -> str | None:
+    if "--revision" not in cmd:
+        return None
+    i = cmd.index("--revision")
+    if i + 1 >= len(cmd):
+        raise InvalidScript("--revision has no value")
+    return cmd[i + 1]
 
 
 def generate(text: str) -> str:
@@ -58,7 +72,10 @@ def generate(text: str) -> str:
         'export CUDA_VISIBLE_DEVICES="$GPUS"',
     ]
     lines += [f"export {k}={shlex.quote(v)}" for k, v in envs.items()]
-    lines.append("nohup " + " ".join(_arg(t) for t in cmd) + ' > "$LOGFILE" 2>&1 &')
+    revision = _revision(cmd)
+    if revision:
+        lines.append(f"REVISION=${{CHECKPOINT_REVISION:-{revision}}}")
+    lines.append("nohup " + " ".join(_arg(t, revision) for t in cmd) + ' > "$LOGFILE" 2>&1 &')
     lines.append('echo $! > "$PIDFILE"; echo $!')
     return "\n".join(lines) + "\n"
 

@@ -67,3 +67,46 @@ def test_converts_the_real_r1_script():
                           ("server-vllm-dcp1.sh", "server-vllm-dcp1-direct.sh")])
 def test_committed_direct_scripts_match_the_generator(docker_script, direct_script):
     assert (HERE / direct_script).read_text() == conv.generate((HERE / docker_script).read_text())
+
+
+REVISION_EXAMPLE = EXAMPLE.replace(
+    "--tensor-parallel-size 4",
+    "--revision abc123 \\\n    --speculative-config '{\"method\":\"mtp\",\"revision\":\"abc123\"}' \\\n"
+    "    --tensor-parallel-size 4")
+
+
+def _served_args(tmp_path, script_text, env_extra):
+    """Runs a generated script with a fake 'vllm' on PATH and returns the arguments it received."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "vllm"
+    fake.write_text('#!/usr/bin/env bash\nprintf "%s\\n" "$@" > "$ARGS_OUT"\n')
+    fake.chmod(0o755)
+    script = tmp_path / "s.sh"
+    script.write_text(script_text)
+    args_out = tmp_path / "args.txt"
+    env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "PIDFILE": str(tmp_path / "pid"),
+           "LOGFILE": str(tmp_path / "log"), "ARGS_OUT": str(args_out), **env_extra}
+    subprocess.run(["bash", str(script)], env=env, check=True)
+    for _ in range(50):
+        if args_out.exists() and args_out.read_text():
+            break
+        subprocess.run(["sleep", "0.1"])
+    return args_out.read_text().splitlines()
+
+
+def test_checkpoint_revision_defaults_to_the_printed_revision(tmp_path):
+    args = _served_args(tmp_path, conv.generate(REVISION_EXAMPLE), {})
+    assert args[args.index("--revision") + 1] == "abc123"
+    assert '"revision":"abc123"' in args[args.index("--speculative-config") + 1]
+
+
+def test_checkpoint_revision_overrides_both_revision_fields(tmp_path):
+    args = _served_args(tmp_path, conv.generate(REVISION_EXAMPLE), {"CHECKPOINT_REVISION": "def456"})
+    assert args[args.index("--revision") + 1] == "def456"
+    spec = args[args.index("--speculative-config") + 1]
+    assert '"revision":"def456"' in spec and "abc123" not in spec
+
+
+def test_script_without_revision_has_no_override():
+    assert "CHECKPOINT_REVISION" not in conv.generate(EXAMPLE)

@@ -33,6 +33,7 @@ Run the harness with `PY=~/bench-venv/bin/python`. On Vast.ai, `vast/prepare_hos
 | `NEEDLE_REF` | `3/500` | errors/total of the reference for the one-sided Fisher test |
 | `STOP_ON_GATE_FAIL` | 1 | stop after the gate when it fails |
 | `GATE_ONLY` | 0 | 1 = stop after the gate |
+| `CHECKPOINT_REVISION` | the revision printed in the vLLM script | serves another revision of `nvidia/GLM-5.3-Flash-FP4-Local` with the `*-direct.sh` scripts; it must be in the HF cache (`EXTRA_REVISIONS` for `vast.sh prepare`). A new revision is a new checkpoint for the gate |
 | `AGENTS_ONLY` | 0 | 1 = skip gate and speed, run only the agent levels |
 | `AGENT_LEVELS` | `8:600 16:900 32:1500` | levels as `agents:seconds`; empty runs none |
 | `AGENT_START`, `AGENT_TOOL`, `AGENT_RESPONSE`, `AGENT_THINK` | `40k-100k`, `1k-6k`, `300-4000`, `0-3` | agent scenario shape |

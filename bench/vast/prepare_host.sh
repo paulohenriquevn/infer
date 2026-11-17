@@ -35,6 +35,10 @@ case "$ENGINE" in
     # server-vllm.sh uses the HF cache in /root/.cache/huggingface with HF_HUB_OFFLINE=1
     "$VENV/bin/hf" download nvidia/GLM-5.3-Flash-FP4-Local \
       --revision f83de1b0169cc3376a25563da66e3fc077e53591 > "$RECORD/download.log" 2>&1
+    # EXTRA_REVISIONS: other revisions of the same repository, served with CHECKPOINT_REVISION=<sha>
+    for rev in ${EXTRA_REVISIONS:-}; do
+      "$VENV/bin/hf" download nvidia/GLM-5.3-Flash-FP4-Local --revision "$rev" >> "$RECORD/download.log" 2>&1
+    done
     ;;
   sglang)
     command -v sglang >/dev/null || { echo "sglang is not on PATH in this image" >&2; exit 2; }

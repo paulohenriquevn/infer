@@ -108,7 +108,7 @@ open('$STATE_DIR/machine.id','w').write(str(o['machine_id']))"
     rssh "grep -q return_token_ids $REMOTE_BENCH && echo 'bench with patch: ok'"
     ;;
   prepare)
-    background "prepare-$engine" "ENGINE=$engine CHECKPOINT=${CHECKPOINT:-fp8} SKIP_CHECKPOINT=${SKIP_CHECKPOINT:-0} bash $REMOTE_BASE/bench/vast/prepare_host.sh"
+    background "prepare-$engine" "ENGINE=$engine CHECKPOINT=${CHECKPOINT:-fp8} SKIP_CHECKPOINT=${SKIP_CHECKPOINT:-0} EXTRA_REVISIONS='${EXTRA_REVISIONS:-}' bash $REMOTE_BASE/bench/vast/prepare_host.sh"
     ;;
   run)
     arm=${3:?arm: r1, dcp1 or ormandj}
@@ -124,6 +124,9 @@ open('$STATE_DIR/machine.id','w').write(str(o['machine_id']))"
       # turns, so idle sessions leave HBM and come back from RAM (or are recomputed) on the next turn
       vllm/lmcache)  background "run-$arm" "$common AGENTS_ONLY=1 AGENT_THINK=${AGENT_THINK:-20-60} CACHE_MODE=lmcache ENGINE=vllm SERVER_SCRIPT=server-vllm-lmcache-direct.sh bash run_benchmark.sh" ;;
       vllm/lmcache-control) background "run-$arm" "$common AGENTS_ONLY=1 AGENT_THINK=${AGENT_THINK:-20-60} CACHE_MODE=vram ENGINE=vllm SERVER_SCRIPT=server-vllm-lmcache-direct.sh bash run_benchmark.sh" ;;
+      # QAD2 weights (nvidia/GLM-5.3-Flash-FP4-Local main, 2026-11-17), quality gate only, same DCP1 profile;
+      # prepare with EXTRA_REVISIONS=76348ddb2be2e35e39ecfc00e75dc07703f4f3d5
+      vllm/dcp1-qad2) background "run-$arm" "$common GATE_ONLY=1 CHECKPOINT_REVISION=76348ddb2be2e35e39ecfc00e75dc07703f4f3d5 ENGINE=vllm SERVER_SCRIPT=server-vllm-dcp1-direct.sh bash run_benchmark.sh" ;;
       vllm/dcp1-rep) background "run-$arm" "$common ENGINE=vllm SERVER_SCRIPT=server-vllm-dcp1-direct.sh bash run_benchmark.sh" ;;
       # DCP1 with the KV pool cut to KV_CACHE_BYTES (default 28 GiB, about 3.5M tokens): active sessions fit, idle ones are evicted
       vllm/lmcache-dcp1)  background "run-$arm" "$common AGENTS_ONLY=1 AGENT_THINK=${AGENT_THINK:-60-100} DCP=1 KV_CACHE_BYTES=${KV_CACHE_BYTES:-30064771072} CACHE_MODE=lmcache ENGINE=vllm SERVER_SCRIPT=server-vllm-lmcache-direct.sh bash run_benchmark.sh" ;;
