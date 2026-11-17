@@ -46,7 +46,7 @@ Goal: show that the AWS host behaves like the good Vast host (157204) and not li
 
 Work:
 
-- Request G7e quota in the chosen region; launch one `g7e.24xlarge` with the fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` and the QAD weights. Download them from `nvidia/GLM-5.3-Flash-FP4-Local` at revision `f83de1b0169cc3376a25563da66e3fc077e53591` once the NVIDIA Open Model Agreement has been read; until then use `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be`. Both hold the same 36 shards (Observed, sha256 on the Hugging Face API, 2026-11-17; see `02-model-hardware-and-checkpoints.md` §3.4 for the licence difference).
+- Request G7e quota in the chosen region; launch one `g7e.24xlarge` with the fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` and the QAD weights. Download them from `nvidia/GLM-5.3-Flash-FP4-Local` at revision `f83de1b0169cc3376a25563da66e3fc077e53591` once legal review accepts the NVIDIA Open Model Agreement (read 2026-11-17; terms summarized in `02-model-hardware-and-checkpoints.md` §3.4); until then use `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be`. Both hold the same 36 shards (Observed, sha256 on the Hugging Face API, 2026-11-17; see `02-model-hardware-and-checkpoints.md` §3.4 for the licence difference).
 - Run the harness in `bench/` (`run_benchmark.sh` with `LAUNCH_MODE=direct` inside the container, or `LAUNCH_MODE=docker` on the host).
 
 Acceptance criteria (values from host 157204 in parentheses, Observed):

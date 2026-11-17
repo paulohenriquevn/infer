@@ -18,7 +18,7 @@ We serve GLM-5.3-Flash to about 10,000 developers who run coding agents. The sys
 
 ## What is open
 
-DCP1 vs DCP4, checkpoint quality against the FP8 original (and the newer QAD2 weights), the NVIDIA Open Model Agreement text, whether the LMCache RAM tier pays off, fleet size, AWS price/quota/driver/P2P. The order of work is the phase plan in `docs/06-aws-implementation-plan.md`; a phase starts only when the previous one passed its acceptance criteria.
+DCP1 vs DCP4, checkpoint quality against the FP8 original (and the newer QAD2 weights), legal review of the weights licence (both licence texts read on 2026-11-17), whether the LMCache RAM tier pays off, fleet size, AWS price/quota/driver/P2P. The order of work is the phase plan in `docs/06-aws-implementation-plan.md`; a phase starts only when the previous one passed its acceptance criteria.
 
 ## Rules for this repository
 
