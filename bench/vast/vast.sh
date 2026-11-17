@@ -61,6 +61,10 @@ case "$cmd" in
       offer=$(vastai search offers "machine_id=$machine num_gpus=4 rentable=true" --raw | python3 -c "import json,sys;o=json.load(sys.stdin);print(o[0]['id'] if o else '')")
       [ -n "$offer" ] || { echo "machine $machine has no 4 free GPUs right now" >&2; exit 3; }
     fi
+    # Bandwidth is billed per GB and varies about 500x between hosts: on 2026-11-17 a host at US$ 0.038/GB
+    # charged US$ 13.52 for 358 GB of checkpoints against US$ 1.66 of GPU time. DOWNLOAD_GB is what prepare
+    # will fetch (178 per checkpoint revision); create refuses offers whose download exceeds MAX_DOWNLOAD_USD.
+    DOWNLOAD_GB=${DOWNLOAD_GB:-178}; MAX_DOWNLOAD_USD=${MAX_DOWNLOAD_USD:-1}
     # the CLI does not filter by id: list the 4x RTX PRO 6000 offers and look for the id here
     { vastai search offers "gpu_name=RTX_PRO_6000_S num_gpus=4 rentable=true" --raw
       vastai search offers "gpu_name=RTX_PRO_6000_WS num_gpus=4 rentable=true" --raw; } | python3 -c "
@@ -72,7 +76,10 @@ while i<len(txt):
     o,i=dec.raw_decode(txt,i); rows+=o
 o=[r for r in rows if str(r['id'])=='$offer']
 if not o: sys.exit('offer $offer is no longer available')
-o=o[0]; print(f\"offer {o['id']}: {o['num_gpus']}x {o['gpu_name']} US\$ {o['dph_total']:.2f}/h, machine {o['machine_id']}, free disk {o['disk_space']:.0f} GB\")
+o=o[0]; print(f\"offer {o['id']}: {o['num_gpus']}x {o['gpu_name']} US\$ {o['dph_total']:.2f}/h, machine {o['machine_id']}, free disk {o['disk_space']:.0f} GB, driver {o.get('driver_version')}\")
+down=o.get('inet_down_cost') or 0.0; gb=float('$DOWNLOAD_GB')
+print(f\"download US\$ {down:.5f}/GB: about US\$ {down*gb:.2f} for {gb:.0f} GB of checkpoint (DOWNLOAD_GB)\")
+if down*gb > float('$MAX_DOWNLOAD_USD'): sys.exit(f'download would cost more than MAX_DOWNLOAD_USD={float(\"$MAX_DOWNLOAD_USD\"):.2f}: pick a host with cheaper bandwidth or raise the limit')
 open('$STATE_DIR/machine.id','w').write(str(o['machine_id']))"
     vastai create instance "$offer" --image "${IMAGES[$engine]}" --disk "${DISK_GB:-${DISK[$engine]}}" --ssh --direct \
       --label "infer-$engine" --raw > "$STATE_DIR/$engine.create.json"

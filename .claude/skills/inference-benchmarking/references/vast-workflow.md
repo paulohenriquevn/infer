@@ -56,6 +56,8 @@ curl -s -G 'https://console.vast.ai/api/v0/bundles/' --data-urlencode "q=$q" | \
 
 That read returned 10 offers of 4 GPUs from US$ 3.20/h (Workstation, reliability 0.69) to US$ 14.67/h; Server Edition offers with reliability above 0.95 started at US$ 5.33/h (Florida, driver 580.178.04) (Reported by the Vast API). Note the driver column: the image expects 615.65.02 or newer (§25.1), and only some hosts run a 6xx driver.
 
+Check the bandwidth price too. Each host sets `inet_down_cost` and `inet_up_cost` per GB, and on 2026-11-17 they ranged from US$ 0.00007 to US$ 0.038 per GB among the 4-GPU Server Edition offers (Observed, `vastai search offers --raw`). Machine 156601 (US$ 10.14/h, driver 620.70.06) charged US$ 13.52 for downloading 358 GB of two checkpoint revisions against US$ 1.66 of GPU time; the charge emptied the account credit and Vast stopped the instance before any test ran (Observed, `vastai show invoices`). `create` now prints the estimated download cost and refuses an offer above `MAX_DOWNLOAD_USD` (default US$ 1 for `DOWNLOAD_GB=178`). Download only the revisions the run uses, and check the balance with `vastai show user` before renting. Copying data out (snapshot, `vastai copy`) is billed at the upload price of the same host.
+
 ## 4. Commands, step by step
 
 All from `bench/vast/` on your machine.
@@ -63,7 +65,7 @@ All from `bench/vast/` on your machine.
 ### `create <engine> <offer_id|same-machine>`
 
 1. With `same-machine`, reads `state/machine.id` and searches `machine_id=<id> num_gpus=4 rentable=true`; stops if the machine has no 4 free GPUs.
-2. Lists `RTX_PRO_6000_S` and `RTX_PRO_6000_WS` 4-GPU offers and finds the ID locally, because the CLI does not filter by `id=` (§28.2). Prints `offer <id>: 4x <gpu> US$ <price>/h, machine <m>, free disk <GB> GB` and saves `machine.id`.
+2. Lists `RTX_PRO_6000_S` and `RTX_PRO_6000_WS` 4-GPU offers and finds the ID locally, because the CLI does not filter by `id=` (§28.2). Prints `offer <id>: 4x <gpu> US$ <price>/h, machine <m>, free disk <GB> GB, driver <version>` and the estimated download cost, stops if that cost exceeds `MAX_DOWNLOAD_USD`, and saves `machine.id`.
 3. `vastai create instance <offer> --image <image> --disk <GB> --ssh --direct --label infer-<engine> --raw`, asserts `success`, stores `new_contract` in `state/<engine>.id`.
 
 Billing starts here.
