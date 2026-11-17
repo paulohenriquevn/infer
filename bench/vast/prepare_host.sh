@@ -33,8 +33,8 @@ case "$ENGINE" in
   vllm)
     command -v vllm >/dev/null || { echo "vllm is not on PATH in this image" >&2; exit 2; }
     # server-vllm.sh uses the HF cache in /root/.cache/huggingface with HF_HUB_OFFLINE=1
-    "$VENV/bin/hf" download local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD \
-      --revision dec48abd33efa73c3bb7c95b74eee10cad34f9be > "$RECORD/download.log" 2>&1
+    "$VENV/bin/hf" download nvidia/GLM-5.3-Flash-FP4-Local \
+      --revision f83de1b0169cc3376a25563da66e3fc077e53591 > "$RECORD/download.log" 2>&1
     ;;
   sglang)
     command -v sglang >/dev/null || { echo "sglang is not on PATH in this image" >&2; exit 2; }

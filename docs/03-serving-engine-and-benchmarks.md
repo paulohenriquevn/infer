@@ -2,7 +2,7 @@
 
 ## Summary
 
-- **Engine decision (2026-11-12):** production runs the local-inference-lab fork of vLLM (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`) with the checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, 4 RTX PRO 6000 per replica, TP4 with MTP3. SGLang was measured on the same host and rejected. (ARQUITETURA.md §29.7)
+- **Engine decision (2026-11-12):** production runs the local-inference-lab fork of vLLM (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`) with the QAD checkpoint (measured as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD@dec48abd33`, downloaded since 2026-11-17 from its identical NVIDIA copy `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016`), 4 RTX PRO 6000 per replica, TP4 with MTP3. SGLang was measured on the same host and rejected. (ARQUITETURA.md §29.7)
 - **Still open:** DCP1 or DCP4, and whether the LMCache RAM tier earns its place. DCP1 served 24 agents inside the SLO in one run; the second speed run landed on a bad host and is not valid (§29.10).
 - **Quality gate:** needle-checksum, 500 runs at concurrency 8, one-sided Fisher exact test against the reference (vLLM DCP4, 3 errors in 500), fail at p < 0.05. Implemented in `bench/summarize.py`.
 - **Host qualification:** the same "4x RTX PRO 6000" offer delivered 5 times lower decode on one host. Every new host runs a short C32 decode test first and is discarded below 1,400 tok/s with the DCP1 profile.
@@ -109,7 +109,7 @@ What runs today (Observed in the launch logs and scripts):
 | Item | Value |
 |---|---|
 | Image | `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` (vLLM build `0.1.dev21830+g8244d1c44`, CUDA 13.4.1, torch 2.14) |
-| Checkpoint | `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be` |
+| Checkpoint | `nvidia/GLM-5.3-Flash-FP4-Local`, revision `f83de1b0169cc3376a25563da66e3fc077e53591` (the same files as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33`, which every measurement used; source changed on 2026-11-17, `docs/02` §3.4) |
 | Launcher | `python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie` from `/opt/lil` inside the image |
 | Parallelism | TP4, `DCP=4` (default) or `DCP=1` |
 | Speculation | MTP, 3 tokens (the fork's wiki reports illegal memory access above 3 at high concurrency, §10.1) |

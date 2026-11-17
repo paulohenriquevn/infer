@@ -110,9 +110,9 @@ WARNING 11-12 02:03:21 [stall_diagnostics.py:197] Request cmpl-a6bb4dea991d6ec8-
 
 ## 7. Model not found offline
 
-- **Symptom.** The server cannot resolve `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` with `HF_HUB_OFFLINE=1`.
+- **Symptom.** The server cannot resolve `nvidia/GLM-5.3-Flash-FP4-Local` (before 2026-11-17: `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`) with `HF_HUB_OFFLINE=1`.
 - **Cause.** `hf download --revision <sha>` does not create `refs/main` (Observed, §25.3).
-- **Fix.** Create `$HF_HOME/hub/models--local-inference-lab--GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD/refs/main` containing `dec48abd33efa73c3bb7c95b74eee10cad34f9be`.
+- **Fix.** Create `$HF_HOME/hub/models--nvidia--GLM-5.3-Flash-FP4-Local/refs/main` containing `f83de1b0169cc3376a25563da66e3fc077e53591`.
 - **Related (mini).** The mini glm5next test model does not load in the fork image because the image's `transformers` lacks `Glm5NextConfig` (Observed (mini), §12.1). Test the fork with the real checkpoint.
 
 ## 8. Illegal memory access (mini)

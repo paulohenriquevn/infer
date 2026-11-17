@@ -7,7 +7,7 @@ We serve GLM-5.3-Flash to about 10,000 developers who run coding agents. The sys
 | Decision | Value | Why, in one line | Source |
 |---|---|---|---|
 | Engine | local-inference-lab fork of vLLM, image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` | SGLang served half the sessions (FP8) or failed quality (NVFP4) on the same host | `docs/03`, §29.7 |
-| Checkpoint | QAD weights `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33efa73c3bb7c95b74eee10cad34f9be`; the same 36 shards are `nvidia/GLM-5.3-Flash-FP4-Local` at `f83de1b016` | Only 4-bit checkpoint that passes the needle gate; NVIDIA's PTQ NVFP4 fails it | `docs/02`, §29.5 |
+| Checkpoint | QAD weights from `nvidia/GLM-5.3-Flash-FP4-Local` at `f83de1b0169cc3376a25563da66e3fc077e53591`: the same files as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33`, which every measurement used; NVIDIA copy chosen for its licence (2026-11-17) | Only 4-bit checkpoint that passes the needle gate; NVIDIA's PTQ NVFP4 fails it | `docs/02`, §29.5 |
 | Replica | 4 RTX PRO 6000 Server Edition, TP4, MTP 3 tokens | Smallest unit that holds the official-size checkpoint; MTP above 3 is unstable | `docs/02` |
 | Quality gate | needle-checksum 500 runs at C8 + 120 at C16, one-sided Fisher vs 3/500, plus gsm8k | 120/120 failed good configurations by chance | `docs/03` §5 |
 | Primary metric | agent sessions inside the SLO per US$/h of a replica | What the product pays for | `docs/01` |

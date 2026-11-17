@@ -82,7 +82,7 @@ Runs `prepare_host.sh` in the background (`setsid -f nohup`, log `/workspace/inf
 
 1. Host record to `/workspace/infer/host-<engine>/host.txt`: `nvidia-smi`, `topo -m`, `topo -p2p r`, `RegistryDwords`, `nproc`, `free -g`, `df -h /`.
 2. Bench venv at `/workspace/infer/bench-venv` with `--system-site-packages` (so the P2P test uses the image's torch without touching the engine's Python), `httpx`, `rich`, and `huggingface_hub[hf_xet]>=0.34` with `--ignore-installed` (the image already ships `huggingface_hub`, and without the flag pip did not create the `hf` executable, §28.2).
-3. Checkpoint: vLLM downloads `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33efa73c3bb7c95b74eee10cad34f9be` into the HF cache; SGLang downloads by `CHECKPOINT` into `/workspace/infer/models/<dir>`.
+3. Checkpoint: vLLM downloads `nvidia/GLM-5.3-Flash-FP4-Local` at `f83de1b0169cc3376a25563da66e3fc077e53591` into the HF cache (the same files as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33`, which every measurement used; source changed on 2026-11-17, `docs/02` §3.4); SGLang downloads by `CHECKPOINT` into `/workspace/infer/models/<dir>`.
 4. All-reduce microbenchmark across the 4 GPUs: `llm_decode_bench.py --p2pmark-only --p2pmark-max-gpus 4 --p2pmark-mode allreduce` into `p2pmark-4gpu.txt`.
 
 Last line of the log: `PREPARE OK: <engine>`. Download speed on host 157204 was 10.5 Gbit/s; the 178 GB checkpoint took about 2.5 min (§28.2).

@@ -16,7 +16,7 @@ Evidence labels used throughout: **Observed** (we measured or read it in the ori
 
 ### The replica
 
-The unit is one engine on 4 RTX PRO 6000 Server Edition GPUs: checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, TP4, MTP3, and either DCP4 or DCP1 (ARQUITETURA.md §12.2, §29.7). The official checkpoints do not fit in fewer than 4 RTX GPUs: the FP8 checkpoint is 328.3 GB and the NVIDIA NVFP4 checkpoint is 204.4 GB, against 96 GB per GPU (Observed via Hugging Face API, §8.3). Only a community checkpoint of 178.0 GB fits on 2 GPUs, with about 7 GB per GPU left for everything else (Inferred, §8.3).
+The unit is one engine on 4 RTX PRO 6000 Server Edition GPUs: QAD checkpoint (`nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016`, the same files as the measured `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD@dec48abd33`), TP4, MTP3, and either DCP4 or DCP1 (ARQUITETURA.md §12.2, §29.7). The official checkpoints do not fit in fewer than 4 RTX GPUs: the FP8 checkpoint is 328.3 GB and the NVIDIA NVFP4 checkpoint is 204.4 GB, against 96 GB per GPU (Observed via Hugging Face API, §8.3). Only a community checkpoint of 178.0 GB fits on 2 GPUs, with about 7 GB per GPU left for everything else (Inferred, §8.3).
 
 The engine decision is the fork's vLLM; whether to run DCP1 or DCP4, with or without LMCache, is still open (§29.7).
 

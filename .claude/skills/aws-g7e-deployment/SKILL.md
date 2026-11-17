@@ -72,7 +72,7 @@ Decided:
 | Decision | Why | Evidence |
 |---|---|---|
 | One replica = one `g7e.24xlarge`; one `g7e.48xlarge` = two replicas | The replica is 4 GPUs with TP4; the 48xlarge layout matches the two-replicas-per-node design the LMCache work assumed | docs/06; §16, §17.2 |
-| Engine: fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`, checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be` | SGLang served half the sessions (FP8) or failed quality (NVFP4) on the same host | Observed, §29.7 (accepted 2026-11-12) |
+| Engine: fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`, checkpoint `nvidia/GLM-5.3-Flash-FP4-Local` at revision `f83de1b0169cc3376a25563da66e3fc077e53591` (the same files as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33`, which every measurement used; source changed on 2026-11-17, `docs/02` §3.4) | SGLang served half the sessions (FP8) or failed quality (NVFP4) on the same host | Observed, §29.7 (accepted 2026-11-12) |
 | IaC: Terraform with S3 state and locking | The Nebius environments are already Terraform; one tool covers both providers we may use | `docs/decisions/2026-11-12-infrastructure-as-code-tool.md` |
 | Plain EC2 with a startup script for phases 1 to 3; EKS question deferred to phase 5 | One or two instances need no scheduler, and the llm-d EPP runs without Kubernetes | docs/06, same decision record; Reported (LMCache PR 5307, §25.1) |
 | Phases run in order; a phase starts only after the previous one passed | Each phase's acceptance criteria are what make the next phase's money worth spending | docs/06 |

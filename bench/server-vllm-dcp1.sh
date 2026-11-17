@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # The vllm serve process behind glm53-flash: profile glm53-flash, hardware rtx-pro-6000-pcie. Printed by the image's launcher (--print-command).
+# Checkpoint source changed on 2026-11-17 to nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016, the same files as the printed
+# local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD@dec48abd33 except README and licence files (docs/02 section 3.4).
 # Run it with the image it was printed from:
 #   IMAGE=ghcr.io/local-inference-lab/vllm:<tag> GPUS=0,1 PORT=8000 bash <this file>
 # "vllm serve ..." as the container command keeps the image's CUDA/NCCL bootstrap and skips the model-profile launcher.
@@ -105,7 +107,7 @@ docker run -d -e HF_HUB_OFFLINE=1 --name "$NAME" --init --gpus "\"device=$GPUS\"
   -e TRITON_NVDISASM_PATH=/usr/local/cuda/bin/nvdisasm \
   -e TRITON_PTXAS_PATH=/usr/local/cuda/bin/ptxas \
   "$IMAGE" \
-  vllm serve local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD \
+  vllm serve nvidia/GLM-5.3-Flash-FP4-Local \
     --additional-config '{"glm53_kda_decode_backend":"auto","kda_prefill_backend":"b12x"}' \
     --attention-backend B12X \
     --block-size 256 \
@@ -142,8 +144,8 @@ docker run -d -e HF_HUB_OFFLINE=1 --name "$NAME" --init --gpus "\"device=$GPUS\"
     --quantization modelopt_mixed \
     --reasoning-parser glm45 \
     --recurrent-checkpoint-policy request_boundaries \
-    --revision dec48abd33efa73c3bb7c95b74eee10cad34f9be \
+    --revision f83de1b0169cc3376a25563da66e3fc077e53591 \
     --served-model-name GLM-5.3-Flash-NVFP4 \
-    --speculative-config '{"method":"mtp","draft_sample_method":"probabilistic","rejection_sample_method":"standard","moe_backend":"marlin","attention_backend":"B12X","num_speculative_tokens":3,"revision":"dec48abd33efa73c3bb7c95b74eee10cad34f9be"}' \
+    --speculative-config '{"method":"mtp","draft_sample_method":"probabilistic","rejection_sample_method":"standard","moe_backend":"marlin","attention_backend":"B12X","num_speculative_tokens":3,"revision":"f83de1b0169cc3376a25563da66e3fc077e53591"}' \
     --tensor-parallel-size 4 \
     --tool-call-parser glm47

@@ -107,7 +107,7 @@ NCCL is the fallback for all-reduces above the B12X one-shot ceiling and the onl
 
 ## Command-line flags
 
-`vllm serve local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` followed by:
+`vllm serve local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` followed by the flags below (as printed by the image; `bench/` now serves `nvidia/GLM-5.3-Flash-FP4-Local` at `f83de1b0169cc3376a25563da66e3fc077e53591`, the same files, since 2026-11-17):
 
 | Flag | Value | What it does | Source |
 |---|---|---|---|

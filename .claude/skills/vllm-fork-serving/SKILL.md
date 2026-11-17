@@ -45,7 +45,7 @@ What runs today (Observed in the launch scripts and server logs, `docs/03-servin
 | vLLM build in the image | `0.1.dev21830+g8244d1c44` (commit `8244d1c44348ae8a5bbfc9f1b607021652283ed4`, branch `dev/karmic-kraken`) |
 | Image contents | CUDA 13.4.1, torch `2.14.0a0` (NVIDIA), NCCL 2.30.7, FlashInfer `0.7.1+lil...g6023d031be8e`, LMCache `0.5.3.dev453+lil...g8ef537d6481b`; env `CUDA_DRIVER_VERSION=615.65.02` (§25.1) |
 | Image digest | `sha256:c14295c214f6126f0fc362f3e6073933a2125de9fc35b938e43842a5dcc40e38` (Observed, version manifest in the project research notes, not published). Check it on every pull |
-| Checkpoint | `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`, revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be` |
+| Checkpoint | `nvidia/GLM-5.3-Flash-FP4-Local`, revision `f83de1b0169cc3376a25563da66e3fc077e53591` (the same files as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33`, which every measurement used; source changed on 2026-11-17, `docs/02` §3.4) |
 | Launcher | `python3 -m runtime.launcher --profile glm53-flash --hardware rtx-pro-6000-pcie`, run from `/opt/lil` inside the image |
 | Parallelism | TP4 on 4 GPUs; `--decode-context-parallel-size 4` (launcher default `DCP=4`) or `1` |
 | Speculation | MTP, `num_speculative_tokens` 3 |
@@ -112,7 +112,7 @@ The same "4x RTX PRO 6000" offer delivered 5 times lower decode on host 48294 (C
 
 ### 6. Fork maintenance conditions (§13.3)
 
-1. Pin the image by digest, the vLLM commit (`8244d1c443`) and the checkpoint revision (`dec48abd...`), and mirror the image in our own registry. Never depend on the moving tag `karmic-kraken-beta`.
+1. Pin the image by digest, the vLLM commit (`8244d1c443`) and the checkpoint revision (`f83de1b016`), and mirror the image in our own registry. Never depend on the moving tag `karmic-kraken-beta`.
 2. Rebuild the image once from its source lock on a CPU VM. Not done yet (Observed, §13.3; `docs/02-model-hardware-and-checkpoints.md` open question 8). Until then the image is a black box.
 3. Run the harness matrix and needle-checksum on every change of image, checkpoint or flag.
 4. Clarify the licences of the image repository (`blackwell-llm-docker`, none declared) and of the QAD checkpoint ("other") before production.

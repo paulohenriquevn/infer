@@ -48,7 +48,7 @@ cell("<b style='font-size:22px'>GLM-5.3-Flash for coding agents on AWS</b><br>"
 
 # external sources (top right)
 cell("Internet: external sources", LANE, 1000, 10, 780, 100)
-hf = cell("<b>Hugging Face Hub</b><br>QAD NVFP4-MXFP8 checkpoint<br>revision dec48abd (177.7 GB)", DEC, 1020, 40, 230, 60)
+hf = cell("<b>Hugging Face Hub</b><br>nvidia/GLM-5.3-Flash-FP4-Local<br>QAD, rev f83de1b0, 177.7 GB", DEC, 1020, 40, 230, 60)
 gh = cell("<b>ghcr.io</b><br>vllm:karmic-kraken-20261016<br>pinned by digest sha256:c14295c2…", DEC, 1270, 40, 250, 60)
 nv = cell("<b>NVIDIA repository</b><br>driver ≥ 615.65.02 +<br>Container Toolkit", OPEN, 1540, 40, 220, 60)
 

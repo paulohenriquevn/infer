@@ -12,7 +12,7 @@ Copy this file into the phase notes for each AWS run and fill the AWS column. Th
 | AMI or image of the host | Vast host image | DLAMI AMI ID |
 | Driver | 615.71.09, CUDA UMD 13.4 | |
 | Engine image | `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`, engine `v0.1.dev21830+g8244d1c44` | same tag |
-| Checkpoint revision | `dec48abd33efa73c3bb7c95b74eee10cad34f9be` | same |
+| Checkpoint revision | `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b0169cc3376a25563da66e3fc077e53591`; shard sha256 equal to `dec48abd33` | same |
 | Server script | `server-vllm-dcp1.sh` | same |
 | Harness | `NEEDLE_RUNS=120` at that time | `NEEDLE_RUNS` default 500 |
 

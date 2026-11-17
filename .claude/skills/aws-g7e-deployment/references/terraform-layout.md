@@ -115,7 +115,7 @@ The user data runs once at first boot as root. Draft: `../examples/user-data-pha
 5. Storage: confirm the instance store mount (`/opt/dlami/nvme`); if two devices are not striped, build RAID 0. Format and mount the kernel cache volume if it is empty, mount it at `/cache`.
 6. Docker and NVIDIA container toolkit: present in the DLAMI (Reported). Check `docker info` and `docker run --rm --gpus all <image> nvidia-smi`. If preparing images on another machine, `{"features":{"containerd-snapshotter":false}}` in `daemon.json` keeps the image under `data-root` (§25.3).
 7. Pull the image by its pinned tag and time it.
-8. Fetch weights at the pinned revision into the Hugging Face cache layout on NVMe (`hf download local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD --revision dec48abd33efa73c3bb7c95b74eee10cad34f9be`), create `refs/main` (§25.3), time it. `HF_TOKEN` comes from the environment of the session that runs it, never from user data.
+8. Fetch weights at the pinned revision into the Hugging Face cache layout on NVMe (`hf download nvidia/GLM-5.3-Flash-FP4-Local --revision f83de1b0169cc3376a25563da66e3fc077e53591`), create `refs/main` (§25.3), time it. `HF_TOKEN` comes from the environment of the session that runs it, never from user data.
 9. Clone this repository at a pinned commit, run `bench/setup_bench.sh` (pins `llm-inference-bench` at `52216d70865a015b34689626d04a80b89c9dc45f`), build the bench venv.
 10. Run the all-reduce microbenchmark (`llm_decode_bench.py --p2pmark-only --p2pmark-max-gpus 4 --p2pmark-mode allreduce`).
 11. Start the server and run the bench: `ENGINE=vllm IMAGE=... SERVER_SCRIPT=server-vllm-dcp1.sh LAUNCH_MODE=docker bash run_benchmark.sh` from `bench/`.

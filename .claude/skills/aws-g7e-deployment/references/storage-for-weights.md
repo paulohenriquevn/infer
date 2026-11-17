@@ -8,7 +8,7 @@ Labels: Reported (URL and read date), Observed (path or journal section), Inferr
 
 | Item | Size | Source |
 |---|---|---|
-| Checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33efa73c3bb7c95b74eee10cad34f9be` | 177.7 GB (docs/02); the loader reported `165G/165G` (Observed, `f3/resultados/vast-20261111/vllm/vast-vllm-dcp1/servidor.log`, Portuguese file name), which is the same size in GiB (177.7 / 1.0737 = 165.5, Inferred) | 49 files on the Hugging Face Hub (Observed, `f3/resultados/vast-20261111/vllm/host-vllm/download.log`) |
+| Checkpoint `nvidia/GLM-5.3-Flash-FP4-Local` at `f83de1b0169cc3376a25563da66e3fc077e53591`, same shards as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at `dec48abd33` (measured below) | 177.7 GB (docs/02); the loader reported `165G/165G` (Observed, `f3/resultados/vast-20261111/vllm/vast-vllm-dcp1/servidor.log`, Portuguese file name), which is the same size in GiB (177.7 / 1.0737 = 165.5, Inferred) | 49 files on the Hugging Face Hub (Observed, `f3/resultados/vast-20261111/vllm/host-vllm/download.log`) |
 | Image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` | 12.9 GB compressed, 30.6 GB uncompressed | §12.1, §17.2 |
 | Kernel cache (`/cache`, B12X JIT and compile artefacts) | Unknown size | §12.2, §13.4 |
 | Results | small (JSON and logs) | `bench/README.md` |
