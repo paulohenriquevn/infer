@@ -72,6 +72,8 @@ The journal grew over two weeks and some early numbers were superseded without b
 | b12x repository | active (§13.3) | archived, moved into FlashInfer (§22.1) |
 | TTFT target scope | 5 s for turns with up to 8K new tokens (§20) | `summarize.py` applies 5 s to every cached turn |
 | SGLang decision reason "llm-d reads vLLM KV events" (§29.7) | | Corrected on 2026-11-12: only the approximate router mode, which ignores events, was tested |
+| AA-LCR and aider numbers for "the QAD checkpoint" (§10.1) | QAD 73.00%, NVFP4 74.00%, aider 88.0% | None is our revision `dec48abd33`: 73.00% is a research checkpoint, 74.00% a PTQ revision, aider ran on the QAD2 weights (corrected 2026-11-17, `02` §3.2) |
+| QAD checkpoint licence (§10.4, §13.3) | "other" | Local Inference Lab License 1.0; the same bytes are under the NVIDIA Open Model Agreement at `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016` (2026-11-17, `02` §3.4) |
 | Per-turn recompute of 3K to 6K tokens | A tail the hybrid KDA cache does not reuse; drives TTFT p95 (§26.2, §29.2) | It is the new tool block of each turn plus 1 token, in 100% of vLLM turns; the cache loses nothing (Observed 2026-11-12 in the raw `agentes-*.json`) |
 | DCP4 at 24 agents | "not measured" | Attempted for 7 minutes in `vast-vllm-r1` (files copied from the `agentes-7min/` attempt), no steady sample |
 | Fork block size | Unknown | `target block size 2048 tokens` in every fork log (1024 in the LMCache run) |

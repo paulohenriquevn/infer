@@ -74,10 +74,10 @@ Read SKILL.md first. Open the others when the task needs the detail.
 
 - **It passes the quality gate on the fork.** needle-checksum 3 errors in 500 at concurrency 8 with DCP4 (the reference), 3 in 620 with DCP1, 0 in 120 at concurrency 16; gsm8k 94/96 to 96/96 on host 157204 (DCP4 runs 94/96 and 96/96, DCP1 95/96) and 96/96 on host 48294 (Observed in `gsm8k.json`; §29.10 says 99%, the raw file says 96/96). First run on Nebius R1: 120/120 and 94/96 (Observed, §12.2).
 - **It fits a TP4 replica with room for KV.** Weights 42.2 GiB per GPU, KV 45.9 GiB per GPU on host 157204 (Observed in logs, §29.2; log line `Model loading took 42.2 GiB memory`). Total size 177.7 GB (Observed, Hugging Face API).
-- **Third-party quality data.** AA-LCR (100 questions, 3 answers each, GPT-5.6 judge): QAD 73.00%, their published NVFP4 74.00%, BF16 71.67%, no statistical difference (McNemar p above 0.40); behavioural fidelity on 7,168 tasks within 1 point; aider polyglot pass@2 88.0 ± 1.1% over 5 runs (Reported, `rtx6kpro`, §10.1). These cover their checkpoints only.
+- **Third-party quality data, none of it on our revision.** AA-LCR (temperature 1.0): a QAD research checkpoint (step 1,750) 73.00%, the PTQ revision `378ca545` of `local-inference-lab/GLM-5.3-Flash-NVFP4` 74.00%, BF16 71.67%, no statistical difference (McNemar p above 0.40). aider polyglot pass@2 88.0 ± 1.1% was measured on the QAD2 weights `qad2-kda-w8a16-csf@96f27f8c`. Behavioural fidelity on 7,168 tasks within 1 point, checkpoint not identified (Reported, `rtx6kpro`, §10.1; checkpoints identified 2026-11-17). The NVIDIA card for the same bytes gives GPQA Diamond 91.3% against 92.1% BF16, but prints that table for two different weight sets.
 - **The engine choice depends on it.** Its scales use the CSF format, which SGLang cannot read. SGLang PRs #46153 and #41624 add CSF support but were written and tested for Qwen (Observed in the PRs, §29.5). No 4-bit checkpoint that SGLang loads reached the fork's quality (§29.5).
 - **Pin the revision.** R1 and every Vast run used `dec48abd33efa73c3bb7c95b74eee10cad34f9be` (Observed, §12.2 and server logs). A new revision is a new checkpoint for the gate.
-- **Licence** (Reported, `LICENSE` in the repository, read 2026-11-12): `lil-license-1.0` is Apache 2.0 plus added terms. It forbids any reupload of the weights or of a re-sharded or re-quantized copy (section 2.1), allows private copies and running an inference service as long as the files are not made available to users (sections 2.2(b) and 2.2(d)), and ends the licence at once on breach. Keep the weights in storage only we control; get the terms reviewed before production (§10.4 item 6, §13.3 condition 4). Digest: `references/checkpoints-and-quantization.md`.
+- **Licence** (Reported, `LICENSE` in the repository, read 2026-11-12): `lil-license-1.0` is Apache 2.0 plus added terms. It forbids any reupload of the weights or of a re-sharded or re-quantized copy (section 2.1), allows private copies and running an inference service as long as the files are not made available to users (sections 2.2(b) and 2.2(d)), and ends the licence at once on breach. Keep the weights in storage only we control; get the terms reviewed before production (§10.4 item 6, §13.3 condition 4). Digest: `references/checkpoints-and-quantization.md`. The same 36 shards are published by NVIDIA as `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b0169cc3376a25563da66e3fc077e53591` under the NVIDIA Open Model Agreement (Observed, sha256, 2026-11-17); the plan is to download from there once that agreement is read (`docs/02` §3.4).
 
 ### 4. Keep MoE activations in 16 bits (W4A16)
 
@@ -147,11 +147,11 @@ Sizes are the sum of `.safetensors` from the Hugging Face API (Observed, §8.3, 
 | `zai-org/GLM-5.3-Flash` (FP8) | 328.3 GB | no | yes, 56 GB left | MIT | SGLang FP8 needle 4/480, same as the fork reference (p = 0.72) (Observed, §29.5) |
 | `nvidia/GLM-5.3-Flash-NVFP4` (PTQ, ModelOpt) | 204.4 GB | no | yes | MIT | **Fails** the needle on upstream vLLM (B300) and SGLang (Observed, §12.3, §29.5) |
 | `RedHatAI/GLM-5.3-Flash-NVFP4` (PTQ W4A4, LLM Compressor) | 197.8 GB | no | yes | MIT (Reported, API) | None of ours |
-| `ormandj/...W4A16-NVFP4-K32-Experts-FP8-WO` (Helix) | 178.0 GB | yes, about 7 GB per GPU left | yes | Unknown | None of ours |
-| `local-inference-lab/GLM-5.3-Flash-NVFP4` | 199.4 GB | no (Inferred) | yes, TP4 profile | MIT | AA-LCR 74.00% (Reported, §10.1) |
+| `ormandj/GLM-5.3-Flash-W4A16-NVFP4-K32-Experts-FP8-WO` | 178.0 GB | yes, about 7 GB per GPU left | yes | MIT | SGLang needle 119/120 and 117/120 at C8 (Observed, `f3/resultados/vast-20261111/sglang/`) |
+| `local-inference-lab/GLM-5.3-Flash-NVFP4` (QAD1 since 2026-09-16) | 199.4 GB | no (Inferred) | yes, TP4 profile | MIT | Needle 0% W4A16, 6% to 9% W4A4 (Reported, `llm-inference-bench`) |
 | `local-inference-lab/GLM-5.3-Flash-NVFP4-Spark` | 187.7 GB | yes, 93.8 GB per GPU, about 4 to 7 GiB of KV left | yes | MIT (Reported, API) | None of ours |
 | **`local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD`** | 177.7 GB | yes (`glm53-tp2` preset) | yes | `lil-license-1.0`: Apache 2.0 plus a ban on reuploads | **Passes** the gate on the fork (Observed, §29.5, §29.6, §29.10) |
-| `nvidia/GLM-5.3-Flash-FP4-Local` (QAD, CSF scales) | 177.5 GB | yes, "about 166 GiB of vRAM" on 2 RTX PRO 6000 (Reported, card) | yes | `nvidia-open-model-agreement` | None of ours |
+| `nvidia/GLM-5.3-Flash-FP4-Local` (QAD, CSF scales) | 177.5 GB | yes, "about 166 GiB of vRAM" on 2 RTX PRO 6000 (Reported, card) | yes | `nvidia-open-model-agreement` | Revision `f83de1b016` = our `dec48abd33`, so it passes; `main` `76348ddb2b` = QAD2, not gated (Observed, sha256) |
 
 With the official NVIDIA or RedHat checkpoints the smallest RTX unit is TP4 (Inferred, §8.3). The DFlash2 drafter is CC BY-NC-ND 4.0, non-commercial (Reported, §10.4 item 6); do not ship it.
 
@@ -182,8 +182,8 @@ With the official NVIDIA or RedHat checkpoints the smallest RTX unit is TP4 (Inf
 3. Which MoE prefill mode `B12X_W4A16_A4_PREFILL=1` actually activates in our runs.
 4. Long-context quality on our stack. Only the 8K needle and gsm8k ran; AA-LCR and the 516K numbers are Reported (§10.1, §23.3).
 5. Whether the `lil-license-1.0` terms fit our hosting (private S3 mirror, AMI snapshots). Needs a legal read.
-6. Whether `VLLM_GLM53_KDA_MXFP8_ACTIVATION_MODE=a16` (KDA MXFP8 with BF16 activation; Reported long-context quality 79.6% against 76.5% at 516K) is worth gating (§23.3).
-7. Whether `nvidia/GLM-5.3-Flash-FP4-Local` holds the same weights as the QAD checkpoint under another licence (compare tensor hashes).
+6. Whether `VLLM_GLM53_KDA_MXFP8_ACTIVATION_MODE=a16` (KDA MXFP8 with BF16 activation; Reported long-context quality 79.6% against 76.5% at 516K, measured on the QAD2 weights, not ours) is worth gating (§23.3).
+7. Answered on 2026-11-17: `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016` holds the same 36 shards as `dec48abd33` (sha256). Still open: the text of the NVIDIA Open Model Agreement.
 
 ## Sources
 

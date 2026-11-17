@@ -46,7 +46,7 @@ Goal: show that the AWS host behaves like the good Vast host (157204) and not li
 
 Work:
 
-- Request G7e quota in the chosen region; launch one `g7e.24xlarge` with the fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` and checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be`.
+- Request G7e quota in the chosen region; launch one `g7e.24xlarge` with the fork image `ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016` and the QAD weights. Download them from `nvidia/GLM-5.3-Flash-FP4-Local` at revision `f83de1b0169cc3376a25563da66e3fc077e53591` once the NVIDIA Open Model Agreement has been read; until then use `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` at revision `dec48abd33efa73c3bb7c95b74eee10cad34f9be`. Both hold the same 36 shards (Observed, sha256 on the Hugging Face API, 2026-11-17; see `02-model-hardware-and-checkpoints.md` §3.4 for the licence difference).
 - Run the harness in `bench/` (`run_benchmark.sh` with `LAUNCH_MODE=direct` inside the container, or `LAUNCH_MODE=docker` on the host).
 
 Acceptance criteria (values from host 157204 in parentheses, Observed):
@@ -56,10 +56,11 @@ Acceptance criteria (values from host 157204 in parentheses, Observed):
 3. `summarize.py --needle-ref 3/500` marks the run `ok`: needle-checksum with 500 runs at C8 is not worse than 3/500 at p < 0.05 (0/500 and 3/120 on the two DCP1 runs).
 4. gsm8k scores at least 94/96 (95/96 and 96/96 on the two DCP1 runs, raw `gsm8k.json`).
 5. The time from instance start to the first served request and the time to load weights are recorded in the result directory (`ready-time.txt`, server log). No pass value: this is the baseline that phase 5 must improve.
+6. The sha256 of each downloaded `.safetensors` shard equals the LFS sha256 that the Hugging Face API lists for `dec48abd33` at the same path. A mismatch means the gate result above does not apply to these files.
 
 If criterion 2 fails, stop: the cause has to be found before buying more instances (§29.10 shows a host 5 times slower with the same software).
 
-## Phase 2: choose DCP1 or DCP4
+## Phase 2: choose DCP1 or DCP4, and confirm checkpoint quality
 
 Work: on the phase 1 instance, run the agent levels 16 and 24 twice with DCP1 and twice with DCP4 (`AGENT_LEVELS="16:900 24:900"`; the second run of each profile with `AGENTS_ONLY=1` and its own output directory, `OUT` for `run_benchmark.sh` or `RUN_SUFFIX=2` for `vast.sh`, because a run overwrites its directory). `summarize.py` shows the second run's gate as not run there; the verdict comes from the first run.
 
@@ -68,6 +69,32 @@ Acceptance criteria:
 1. Four result directories exist, each with `agents-16.json` and `agents-24.json`.
 2. `summarize.py` prints, for each, the agent level inside the SLO (measured elsewhere: DCP1 24 in one run; DCP4 16 then fail at 16).
 3. The chosen profile is the one whose lower of the two runs has more sessions inside the SLO. The choice and both numbers are written to `03-serving-engine-and-benchmarks.md`.
+
+### Checkpoint quality against the FP8 original
+
+Why: our weights pass the needle gate, but nobody has compared them with the original model on coding-agent tasks, long context or Portuguese. QAD also adapts routers, shared experts and dense MLPs on 500M synthetic tokens (Reported, `nvidia/GLM-5.3-Flash-FP4-Local` card), so the result is a slightly different model, and the needle gate has little power: 6 errors in 500 still pass (p = 0.25, Inferred). The NVIDIA card's two benchmarks cannot settle it: GPQA Diamond has 198 questions and the same table is printed for two different weight sets (`02-model-hardware-and-checkpoints.md` §3.1).
+
+Work, on the phase 1 instance type, with the profile chosen above:
+
+- Reference: `zai-org/GLM-5.3-Flash` (FP8, 328.3 GB, revision `46a050bec13002ad29ee795c16e61cf4fa3c4a9c`) on 4 GPUs, served by the fork if it loads FP8, otherwise by SGLang, which matched the fork on the needle (§29.5).
+- Candidates: the current weights (`f83de1b016` = `dec48abd33`) and the QAD2 weights (`nvidia/GLM-5.3-Flash-FP4-Local@76348ddb2be2e35e39ecfc00e75dc07703f4f3d5` = LIL `qad2-kda-w8a16-csf@96f27f8c4e443be5bc486f8a978e3b9e0d3f7125`). QAD2 first passes the needle gate; if it fails, it leaves the comparison.
+- Fix before the first run, and commit to the repository: the prompt set, the task list, the seeds and the number of tasks. Choose the number of tasks so that the one-sided 95% bound of the paired difference can fall within 2 percentage points; if that number is not affordable, the comparison can only report, not accept.
+- Measures, each on the reference and on every candidate:
+  1. KL divergence of next-token distributions against the FP8 reference on a fixed set of coding-agent prompts (top-k logprobs from the server). The fastest signal of numerical drift; the first run sets the baseline, no threshold yet.
+  2. Resolve rate on a fixed subset of SWE-bench Verified or Terminal-Bench 2.1, paired task by task, at temperature 0 and at the production sampling.
+  3. Retrieval at 128K and 256K tokens.
+  4. Tool-call validity and turn errors at the harness agent levels.
+  5. A Portuguese sample from the same suites.
+  6. Vision, only if the product accepts images.
+
+Acceptance criteria:
+
+1. Result directories exist for the reference and each candidate, with the committed prompt and task lists and the engine, image and revision of each run.
+2. For each candidate, the report gives the resolve rate of both arms, the paired difference with its one-sided 95% bound (McNemar or exact paired test), the retrieval scores, the tool-call error rate and the mean KL divergence.
+3. A candidate passes if the lower 95% bound of (candidate resolve rate minus FP8 resolve rate) is above minus 2 percentage points, its retrieval at 128K and 256K is no more than 2 points below FP8, it has no more turn errors than FP8, and it passed the needle gate.
+4. Decision rule: keep the current weights if they pass. Switch to QAD2 only if QAD2 also passes and its resolve rate is not lower than the current weights' in the paired comparison. If the current weights fail, stop: the checkpoint choice is reopened before phase 3. The result and the decision are written to `02-model-hardware-and-checkpoints.md` §3.
+
+The 2-point margin was set on 2026-11-17 as a product decision.
 
 ## Phase 3: two replicas behind the router
 
