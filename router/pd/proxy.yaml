@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pd-proxy
+  labels: {app: pd-proxy, project: infer-validation}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: proxy
+      image: vllm/vllm-openai:v0.32.0
+      command: ["python3", "/proxy/toy_proxy_server.py", "--host", "0.0.0.0", "--port", "8192",
+                "--prefiller-hosts", "pd-prefill", "--prefiller-ports", "8000",
+                "--decoder-hosts", "pd-decode", "--decoder-ports", "8000"]
+      ports: [{containerPort: 8192}]
+      volumeMounts: [{name: p, mountPath: /proxy}]
+  volumes:
+    - name: p
+      configMap: {name: pd-proxy-src}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pd-proxy
+spec:
+  selector: {app: pd-proxy}
+  ports: [{name: http, port: 8192, targetPort: 8192}]

@@ -1,0 +1,113 @@
+diff --git a/llm_decode_bench.py b/llm_decode_bench.py
+index ee4a5f2..5db2eff 100644
+--- a/llm_decode_bench.py
++++ b/llm_decode_bench.py
+@@ -20324,15 +20324,29 @@ def sched_payload(ctx: SchedulerContext, prompt, max_tokens: int, *, collect_ids
+     if ctx.settings.temperature is not None:
+         payload["temperature"] = ctx.settings.temperature
+     if collect_ids:
+-        payload["logprobs"] = 1
+-        payload["return_tokens_as_token_ids"] = True
++        if ctx.engine == ENGINE_SGLANG:
++            # SGLang streams each chunk's new output IDs in choices[].token_ids.
++            payload["return_token_ids"] = True
++        else:
++            payload["logprobs"] = 1
++            payload["return_tokens_as_token_ids"] = True
+     return payload
+ 
+ 
++def sched_exact_history(ctx: SchedulerContext) -> bool:
++    """Whether agent turns can append the model's own output token IDs (both engines return them)."""
++    return ctx.engine in (ENGINE_VLLM, ENGINE_SGLANG) and ctx.prompts.mode == "token_ids"
++
++
+ def sched_chunk_token_ids(data: dict) -> list:
+-    """Token IDs of a completions chunk with return_tokens_as_token_ids ('token_id:123')."""
++    """Token IDs of a completions chunk: SGLang's choices[].token_ids (return_token_ids) or
++    vLLM's logprobs tokens with return_tokens_as_token_ids ('token_id:123')."""
+     ids = []
+     for choice in data.get("choices") or []:
++        token_ids = choice.get("token_ids") if isinstance(choice, dict) else None
++        if isinstance(token_ids, list):
++            ids.extend(t for t in token_ids if isinstance(t, int))
++            continue
+         logprobs = choice.get("logprobs") if isinstance(choice, dict) else None
+         if not isinstance(logprobs, dict):
+             continue
+@@ -20772,10 +20786,10 @@ async def sched_run_agents(run: SchedulerRun) -> None:
+         run.skip(f"conversations need room for {s.agent_response[1]} response + {s.agent_tool[1]} tool tokens; "
+                  "the model length / KV pool is too small")
+         return
+-    exact = ctx.engine == ENGINE_VLLM and ctx.prompts.mode == "token_ids"
++    exact = sched_exact_history(ctx)
+     if not exact:
+         run.note("responses are appended as random tokens of the same count (exact response token IDs need "
+-                 "vLLM with /tokenize)")
++                 "vLLM or SGLang with /tokenize)")
+     d = run.data
+     d.update(agents=s.agents, cap=cap, start=(start_lo, start_hi), exact_history=exact,
+              turns=[], samples=[], resets=0)
+diff --git a/tests/test_agent_exact_history.py b/tests/test_agent_exact_history.py
+new file mode 100644
+index 0000000..23f382d
+--- /dev/null
++++ b/tests/test_agent_exact_history.py
+@@ -0,0 +1,57 @@
++"""Exact agent history on SGLang.
++
++The agents scenario appends the model's own output token IDs to the next turn
++so that the prefix cache can reuse the whole previous request. vLLM returns
++them through logprobs with return_tokens_as_token_ids; SGLang returns them in
++choices[].token_ids when the request sets return_token_ids. Without exact IDs
++on one engine, an A/B between engines measures the harness, not the cache.
++No GPU or server is needed.
++"""
++import importlib.util
++from pathlib import Path
++from types import SimpleNamespace
++
++
++MODULE_PATH = Path(__file__).resolve().parents[1] / "llm_decode_bench.py"
++SPEC = importlib.util.spec_from_file_location("llm_decode_bench_exact", MODULE_PATH)
++BENCH = importlib.util.module_from_spec(SPEC)
++assert SPEC.loader is not None
++SPEC.loader.exec_module(BENCH)
++
++
++def make_ctx(engine, prompt_mode="token_ids"):
++    return SimpleNamespace(
++        engine=engine,
++        model="m",
++        settings=SimpleNamespace(temperature=None),
++        prompts=SimpleNamespace(mode=prompt_mode),
++    )
++
++
++def test_sglang_payload_asks_for_output_token_ids():
++    payload = BENCH.sched_payload(make_ctx(BENCH.ENGINE_SGLANG), [1, 2, 3], 8, collect_ids=True)
++    assert payload["return_token_ids"] is True
++    assert "return_tokens_as_token_ids" not in payload
++
++
++def test_vllm_payload_keeps_logprob_token_ids():
++    payload = BENCH.sched_payload(make_ctx(BENCH.ENGINE_VLLM), [1, 2, 3], 8, collect_ids=True)
++    assert payload["return_tokens_as_token_ids"] is True
++    assert payload["logprobs"] == 1
++    assert "return_token_ids" not in payload
++
++
++def test_sglang_chunk_token_ids_are_read():
++    chunk = {"choices": [{"index": 0, "text": "ab", "token_ids": [17, 42]}]}
++    assert BENCH.sched_chunk_token_ids(chunk) == [17, 42]
++
++
++def test_vllm_chunk_token_ids_are_still_read():
++    chunk = {"choices": [{"logprobs": {"tokens": ["token_id:5", "token_id:9"]}}]}
++    assert BENCH.sched_chunk_token_ids(chunk) == [5, 9]
++
++
++def test_exact_history_on_both_engines_only_with_token_id_prompts():
++    assert BENCH.sched_exact_history(make_ctx(BENCH.ENGINE_VLLM))
++    assert BENCH.sched_exact_history(make_ctx(BENCH.ENGINE_SGLANG))
++    assert not BENCH.sched_exact_history(make_ctx(BENCH.ENGINE_SGLANG, prompt_mode="text"))

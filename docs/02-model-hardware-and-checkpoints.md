@@ -16,7 +16,7 @@ Almost every performance number here comes from a single run per cell, without c
 
 - **Model.** 320B total parameters, 18B active, 45 layers (34 KDA linear attention, 11 sparse MLA/DSA), 288 routed experts with 8 per token, 1 MTP layer, context of 1,048,576 tokens (Reported, model card and vLLM recipe; layer split Observed in `config.json`).
 - **KV cost.** About 8.7 KB per token of MLA KV plus a fixed KDA state of about 0.15 GB per sequence, so about 2.3 GB for a 256K session (Observed on B300, §9.3; corroborated by a Reported 8.3 KB per token in §10.1). The earlier estimate of 1.62 GB per 256K session is superseded. Without DCP, MLA KV is replicated on every TP rank.
-- **Replica.** 4 RTX PRO 6000 in TP4 with the `local-inference-lab` vLLM fork (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`) and the checkpoint `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` (177.7 GB). With DCP4 this replica held 23.2 million KV tokens, about 88.7 sessions of 262,144 tokens in HBM (Observed, R1, §12.2).
+- **Replica.** 4 RTX PRO 6000 in TP4 with the `local-inference-lab` vLLM fork (`ghcr.io/local-inference-lab/vllm:karmic-kraken-20261016`) and the QAD checkpoint (177.7 GB), measured as `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD@dec48abd33` and downloaded since 2026-11-17 from the identical `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016`. With DCP4 this replica held 23.2 million KV tokens, about 88.7 sessions of 262,144 tokens in HBM (Observed, R1, §12.2).
 - **Quality.** The QAD checkpoint on the fork passes the `needle-checksum` probe (3 errors in 500 at concurrency 8 for DCP4; 3 in 620 for DCP1). The NVIDIA NVFP4 PTQ checkpoint failed the same probe on upstream vLLM 0.32.0 on a B300 (108/120) and on SGLang (22 to 60 errors in 500 depending on kernels) (Observed, §12.3, §29.5).
 - **Main risks.** The speed comes from fork-only code (B12X kernels, prefill compute share, a forked LMCache with its own DCP). The fork was 409 commits ahead and 3,304 behind vLLM `main` when checked on 2026-11-05 (§13.3), and PCIe P2P configuration on the host changes all-reduce latency by several times (§23, §25.2, §28.2).
 
@@ -94,7 +94,7 @@ Operational details that cost us time (Observed, §25.3): the Nebius image alrea
 
 Effect of the override on server decode: Unknown. The P0 server never started in that session (§25.2). The faster decode on Vast machine 157204 (145.6 against 119.8 tok/s at C1) is attributed to the faster all-reduce, Inferred and not isolated (§29.2).
 
-A test before trusting any host: decode at C32 for about 5 minutes after the server is up, and discard the host below 1,400 tok/s (decision in §29.10).
+A test before trusting any host: decode at C32 for about 5 minutes after the server is up, and discard the host below 1,400 tok/s with the DCP1 profile; DCP4 gives about 1,280 on a good host (decision in §29.10).
 
 ### 2.3 All-reduce backend
 
@@ -152,18 +152,19 @@ Sizes are the sum of `.safetensors` files from the Hugging Face API (Observed, �
 
 | Checkpoint | Size | Fits 2 RTX (192 GB) | Fits 4 RTX (384 GB) | Fits 1 B300 (288 GB) | Licence | Quality evidence |
 |---|---|---|---|---|---|---|
-| `zai-org/GLM-5.3-Flash` (FP8) | 328.3 GB | no | yes, 56 GB left | no | MIT | SGLang FP8 needle 4/480, same as the vLLM fork reference (p = 0.72) (Observed, §29.5) |
+| `zai-org/GLM-5.3-Flash` (FP8) | 328.3 GB | no | yes, 56 GB left | no | MIT | SGLang FP8 needle 4/240 at C8 and 0/240 at C16, same as the vLLM fork reference (p = 0.72) (Observed, §29.5) |
 | `nvidia/GLM-5.3-Flash-NVFP4` (PTQ, ModelOpt) | 204.4 GB | no | yes | yes, 84 GB left | MIT | **Failed** the needle probe on upstream vLLM (B300) and SGLang (§3.3) |
-| `RedHatAI/GLM-5.3-Flash-NVFP4` | 197.8 GB | no | yes | yes, 90 GB left | Unknown | None |
-| `ormandj/...W4A16-NVFP4-K32-Experts-FP8-WO` (Helix) | 178.0 GB | yes, about 7 GB per GPU left | yes | yes | Unknown | None of ours |
-| `local-inference-lab/GLM-5.3-Flash-NVFP4` | 199.4 GB | no (Inferred) | yes; TP4 profile | not stated | MIT | AA-LCR 74.00% (Reported, §10.1) |
-| `local-inference-lab/GLM-5.3-Flash-NVFP4-Spark` | 187.7 GB | yes: 93.8 GB per GPU, about 4 to 7 GiB of KV left | yes | not stated | not stated in the source | None of ours |
-| `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` | 177.7 GB | yes (`glm53-tp2` preset) | yes | not stated | "other" on the Hugging Face API | Passes (§3.2) |
-| `nvidia/GLM-5.3-Flash-FP4-Local` | 177.5 GB | not stated | not stated | not stated | "other" | None; card not read (NOTAS.md) |
+| `RedHatAI/GLM-5.3-Flash-NVFP4` | 197.8 GB | no | yes | yes, 90 GB left | MIT, `LICENSE` file since 2026-10-27 (Observed, repository commits) | None of ours. W4A4 on the routed experts of layers 3 to 44, MTP experts in FP8 (Observed, `recipe.yaml`). Card: GSM8K Platinum 97.74%, GPQA Diamond 90.57%, no baseline and no sampling stated (Reported) |
+| `ormandj/GLM-5.3-Flash-W4A16-NVFP4-K32-Experts-FP8-WO` | 178.0 GB | yes, about 7 GB per GPU left | yes | yes | MIT (Observed, card) | SGLang arms: needle 119/120 and 117/120 at C8 (Observed, `f3/resultados/vast-20261111/sglang/vast-sglang-ormandj*/needle*.json`). Card: GSM8K 96.9% greedy (Reported). Loads only in the `ormandj/sglang-glm53-flash-sm120` image |
+| `local-inference-lab/GLM-5.3-Flash-NVFP4` | 199.4 GB | no (Inferred) | yes; TP4 profile | not stated | MIT | QAD1 since 2026-09-16 (`main` = `175ae8ce`). Needle 0% with W4A16, 6.0% to 9.0% with W4A4 (Reported, `llm-inference-bench` README). Its PTQ revision `46aaae8a` erred 18% to 23% with W4A16 (Reported, same) |
+| `local-inference-lab/GLM-5.3-Flash-NVFP4-CSF-QAD` | 188.9 GB | not stated | yes | not stated | Local Inference Lab License 1.0 | None. CSF container of QAD1 `175ae8ce` (Observed, Hugging Face API) |
+| `local-inference-lab/GLM-5.3-Flash-NVFP4-Spark` | 187.7 GB | yes: 93.8 GB per GPU, about 4 to 7 GiB of KV left | yes | not stated | MIT (Observed, card) | None of ours |
+| `local-inference-lab/GLM-5.3-Flash-NVFP4-MXFP8-CSF-QAD` | 177.7 GB | yes (`glm53-tp2` preset) | yes | not stated | Local Inference Lab License 1.0 since `32d392e194` (2026-10-05); revisions up to `9ca06e24` are MIT (Observed, `LICENSE` and `NOTICE`) | Passes (§3.2). Its card says LIL did not run GPU inference or multimodal evaluation on it |
+| `nvidia/GLM-5.3-Flash-FP4-Local` | 177.5 GB | yes: validated on 2 RTX PRO 6000 with 1.8M FP8 KV tokens, about 166 GiB of VRAM (Reported, card) | yes | not stated | NVIDIA Open Model Agreement; the card says "ready for commercial or non-commercial use" (Reported; agreement text not read) | Revision `f83de1b0169cc3376a25563da66e3fc077e53591` holds the same 36 shards as our `dec48abd33` (sha256, Observed), so our gate result applies to it. `main` (`76348ddb2b`, weights replaced on 2026-10-15) holds the 42 shards of LIL `qad2-kda-w8a16-csf@96f27f8c` (Observed): not gated. Card: GPQA Diamond 91.3% against 92.1% BF16, ToolEvalBench 92.4% against 91.9%; the same table appears on both revisions, so it cannot describe both weight sets (Reported; Inferred) |
 
-With the official NVIDIA or RedHat checkpoints, the minimum RTX unit is TP4 (Inferred, §8.3). A related artefact, the DFlash2 drafter, is CC BY-NC-ND 4.0, non-commercial (Reported, §10.4 item 6). One `rtx6kpro` page says the checkpoint download is "about 60 GB", which contradicts the API totals; we trust the API (Observed, §10.4 item 7).
+With the official NVIDIA or RedHat checkpoints, the minimum RTX unit is TP4 (Inferred, §8.3). Outside this table, 245 Hugging Face repositories declare themselves quantizations of the model. The two weight-only (W4A16) ones with a credible source and an MIT licence are `canada-quant/GLM-5.3-Flash-W4A16-MTP` (190.8 GB; GSM8K 0.970 to 0.975 and a published TP4 + MTP recipe on 4 RTX PRO 6000) and `Intel/GLM-5.3-Flash-W4A16-AutoRound` (181.5 GB; GSM8K 0.9712 against 0.9735 for BF16, MTP experts quantized). Neither publishes a needle test at temperature 0 (Reported, model cards; census in the project research report "Checkpoints GLM 5.3 Flash no RTX", 2026-11-17, not published). A related artefact, the DFlash2 drafter, is CC BY-NC-ND 4.0, non-commercial (Reported, §10.4 item 6). One `rtx6kpro` page says the checkpoint download is "about 60 GB", which contradicts the API totals; we trust the API (Observed, §10.4 item 7).
 
-What the NVIDIA NVFP4 quantizes: routed experts and the dense MLPs of the first layers, in groups of 16, weights and activations in FP4, KV in static FP8. Excluded from quantization (134 entries): `lm_head`, `embed_tokens`, all `self_attn*` including KDA, the `mlp.gate` routers, `shared_experts*`, the vision tower and the MTP layer (Observed, `quantization_config`, NOTAS.md).
+What the NVIDIA NVFP4 quantizes: routed experts and the dense MLPs of layers 0 to 2, in groups of 16, weights and activations in FP4. The activation input scale is static per layer and identical across the experts of a layer. KV is FP8 in cast mode with a constant amax of 448, so there is no calibrated KV scale (Observed, `.quant_summary.txt` and `hf_quant_config.json`, read 2026-11-17). The card prose says shared experts are quantized; the files show they are not. Excluded from quantization (134 entries): `lm_head`, `embed_tokens`, all `self_attn*` including KDA, the `mlp.gate` routers, `shared_experts*`, the vision tower and the MTP layer (Observed, `quantization_config`, NOTAS.md).
 
 ### 3.2 Quality evidence for the QAD checkpoint on the fork
 
@@ -173,11 +174,11 @@ What the NVIDIA NVFP4 quantizes: routed experts and the dense MLPs of the first 
 | `gsm8k`, 96 problems | 94/96 | same | Observed (§12.2) |
 | needle, DCP4, 500 runs at C8 | 3 errors in 500; 0 in 120 at C16 | Vast 157204, 2026-11-11 | Observed (§29.5, §29.6) |
 | needle, DCP1 | 3/120 at C8 (157204), then 500/500 at C8 and 120/120 at C16 (48294); total 3 in 620 at C8 | Vast, 2026-11-11 and 2026-11-12 | Observed (§29.6, §29.10) |
-| `gsm8k` | 94/96 on 157204; 99% on 48294 | Vast | Observed (§29.4, §29.10) |
-| AA-LCR (100 questions, 3 answers each, GPT-5.6 judge) | QAD 73.00%, published NVFP4 74.00%, BF16 71.67%; no statistical difference (McNemar p above 0.40) | `rtx6kpro` | Reported (§10.1) |
-| Behavioural fidelity, 7,168 tasks | equivalent within 1 point | `rtx6kpro` | Reported (§10.1) |
-| aider polyglot, 5 runs | pass@2 88.0 ± 1.1% | `rtx6kpro`, for their checkpoints | Reported (§10.1) |
-| Needle reference table, vLLM b12x, 500 requests per cell | 0% errors with W4A16, 6% to 9% with W4A4, 18% to 23% with a pre-QAD checkpoint | `llm-inference-bench` README | Reported (§29.4) |
+| `gsm8k` | 94/96 to 96/96 on 157204; 96/96 on 48294 (§29.10 says 99%; the raw `gsm8k.json` says 96/96) | Vast | Observed (§29.4, §29.10) |
+| AA-LCR (100 questions, 3 answers each, GPT-5.6 judge, temperature 1.0) | QAD research checkpoint (step 1,750) 73.00%, PTQ revision `378ca545` of `local-inference-lab/GLM-5.3-Flash-NVFP4` 74.00%, BF16 71.67%; no statistical difference (McNemar p above 0.40). Neither is `dec48abd33` | `rtx6kpro` page `aa-lcr-bf16-vs-nvfp4.md` | Reported (§10.1; checkpoints identified 2026-11-17) |
+| Behavioural fidelity, 7,168 tasks | equivalent within 1 point; checkpoint not re-identified on 2026-11-17 | `rtx6kpro` | Reported (§10.1) |
+| aider polyglot, 5 runs, temperature 1.0 | pass@2 88.0 ± 1.1%, pass@1 46.0 ± 1.5%, on `qad2-kda-w8a16-csf@96f27f8c` with image `release-10152026`, not on `dec48abd33` | `rtx6kpro` page `aider-polyglot-release-10152026.md` | Reported |
+| Needle reference table, vLLM b12x, 500 requests per cell | 0% errors with W4A16 and 6% to 9% with W4A4 on `local-inference-lab/GLM-5.3-Flash-NVFP4` `main` (QAD1); 18% to 23% with W4A16 on its PTQ revision `46aaae8a`. LIL also reports 0.5% near misses on the MIT revision `9ca06e24` of our repository (TP2, DCP2, MTP3, C8) | `llm-inference-bench` README; card of `9ca06e24` | Reported (§29.4; rows identified 2026-11-17) |
 
 Our fork configuration runs the MoE as W4A16 with `B12X_W4A16_FP32_TOPK_WEIGHTS=1`, the 0% row of that table (Observed, §29.4). The "3330 instead of 3332" answer is the model's known last-digit slip on a near tie, and the probe is an alarm for numerical changes such as MoE activation precision (Reported, `llm-inference-bench` README, §29.4). A kernel bug in the B12X NVFP4 prefill (R33, missing SwiGLU clamp, fixed in R35) passed through several releases, and W4A4 showed 5.9% wrong answers against 0 of 500 with 16-bit activations (Reported, §10.4 item 1).
 
@@ -188,7 +189,7 @@ Acceptance rule in force (decided 2026-11-12, §29.5): `needle-checksum` with 50
 | Stack | Needle result | Evidence |
 |---|---|---|
 | Upstream vLLM 0.32.0, 1 B300, MTP3, `--max-num-batched-tokens 4096`, snapshot `1d00738646...`, 2026-11-05 | 108 EXACT and 12 NEAR_MISS (checksum 3330) in 120, 90.0%; Wilson 95% interval about 5.8% to 16.7% error | Observed (§12.3, §9.3) |
-| SGLang, ormandj v0.5.0 profile, revision `09b04e5e` (no QAD), C8 / C16 | 94/120 and 99/120; without speculative decoding 109/120 and 104/120 | Observed, Vast 157204, 2026-11-11 (§29.4) |
+| SGLang, ormandj v0.5.0 profile, revision `09b04e5e` (PTQ weights of 2026-09-04, in which about a third of the routed experts had a `weight_scale_2` calibrated on another expert, fixed in `1d00738`; ModelOpt PR 3060), C8 / C16 | 94/120 and 99/120; without speculative decoding 109/120 and 104/120 | Observed, Vast 157204, 2026-11-11 (§29.4) |
 | SGLang, revision `1d00738` (NVIDIA calibration fix of 28 Oct), MoE W4A4 | 60 errors in 500 at C8, 19 in 120 at C16; p = 2·10⁻¹⁵ against vLLM | Observed (§29.5) |
 | Same, MoE on Marlin (W4A16) | 32 in 500, 5 in 120; p = 3·10⁻⁷ | Observed (§29.5) |
 | Same, Marlin, no speculative decoding, SSM state in FP32 | 22 in 500, 10 in 120; p = 1·10⁻⁴ | Observed (§29.5) |
@@ -199,15 +200,17 @@ Reading:
 - In SGLang, MoE activation quantization explains about half of the remaining error (Marlin vs W4A4, p = 0.003); speculative decoding and SSM state dtype had no measurable effect (p = 0.21) (Observed, §29.5).
 - The residual comes from the NVFP4 weights without QAD (Inferred, §29.5): with the original FP8 weights SGLang matched vLLM.
 - Open bugs #48919, #48931 and #48907 do not apply to this checkpoint (Observed by reading the checkpoint), and #49309 does not explain the residual, which persists without speculation (§29.5).
-- We decided not to open an issue against the NVIDIA checkpoint: this is expected PTQ behaviour, and we only tested it in SGLang and upstream vLLM on B300, not in the engine NVIDIA validated it for (§29.9).
+- We decided not to open an issue against the NVIDIA checkpoint: this is expected PTQ behaviour, and we only tested it in SGLang and upstream vLLM on B300. NVIDIA validated it on GB200 with vLLM and SGLang; its card does not mention SM120 (§29.9; card read 2026-11-17).
+- Untested: this checkpoint on the fork with the MoE forced to 16-bit activations (`VLLM_B12X_MOE_FP4_FORCE_A16=1`). The LIL PTQ revision `46aaae8a` still erred 18% to 23% in that mode (Reported), so W4A16 is not expected to rescue a PTQ checkpoint (Hypothesis).
 
 ### 3.4 Why the QAD checkpoint
 
 - It passes the quality rule on the fork (§3.2).
 - It fits a TP4 replica with room for KV: on Vast 157204, weights took 42.2 GiB per GPU and KV got 45.9 GiB per GPU (Observed in logs, §29.2).
-- The engine decision (vLLM fork) depends on it: its scales use the CSF format, which SGLang cannot read. SGLang PRs #46153 and #41624 add CSF support but were written and tested for Qwen (Reported, §29.5). No 4-bit checkpoint that SGLang loads today reaches vLLM's quality (§29.5).
+- The engine decision (vLLM fork) depends on it: its scales use the CSF format, which SGLang cannot read. SGLang PRs #46153 and #41624 add CSF support but were written and tested for Qwen (Reported, §29.5), and #46153 covers `csf` only, not the `csf_32x2_v1` of the QAD2 weights (Reported, 2026-11-17). No 4-bit checkpoint that SGLang loads today reaches vLLM's quality (§29.5). Upstream vLLM v0.34.0 (2026-11-16) decodes `csf` and `csf_32x2_v1` (PR #64312); whether it runs this mixed layout on SM120 with a 16-bit-activation MoE path is Unknown.
 - Pinned revision used in R1: `dec48abd33efa73c3bb7c95b74eee10cad34f9be` (Observed, §12.2).
-- Open risk: the licence is "other" on the Hugging Face API and must be read before production (§10.4 item 6, §13.3 condition 4).
+- Licence: the Local Inference Lab License 1.0 is Apache 2.0 plus restrictions: no reupload (including mirrors and container registries), an attribution notice at the top of the main page of any service that runs the model, automatic termination on breach, Kentucky law; no non-commercial clause (Observed, `LICENSE`, read 2026-11-17; our reading, not legal advice). The same bytes are published by NVIDIA as `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b0169cc3376a25563da66e3fc077e53591` under the NVIDIA Open Model Agreement (Observed, sha256 of all 36 shards). The agreement (release date April 2, 2026, terms version March 9, 2026; read 2026-11-17 at https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-agreement/) states that the works are commercially usable and grants a perpetual, worldwide, royalty-free, irrevocable licence to reproduce, modify, sublicense and distribute. Redistribution must carry a copy of the licence and keep the notices; it has no reupload ban, no service-page notice and no termination on breach, only on patent or copyright litigation against the work. Two terms need legal review: we indemnify NVIDIA against any third-party claim arising from our use, distribution or outputs, and the law is Delaware with courts in Santa Clara County. Export and sanctions rules apply. The base model's MIT licence also applies, as the card states (Observed, agreement text and card). Decided on 2026-11-17 (`decisions/2026-11-17-qad-weights-source.md`): download from the NVIDIA copy. Every runtime file at both revisions is identical (config, tokenizer, chat template, index and the 36 shards; only README and licence files differ, Observed), so this is not a serving change and needs no new gate run. Legal review of the indemnity and of the provenance question below stays a condition before production. Open point for that review: NVIDIA published on 2026-10-14 bytes that LIL had published on 2026-10-07 under LIL-1.0, both uploaded by the same author, so which licence binds the bytes is a legal question, not a technical one (Inferred from the commit history).
+- Open quality questions: coding-agent task quality, long context and Portuguese against the FP8 original were never measured for these weights. Phase 2 of `06-aws-implementation-plan.md` measures them, together with the QAD2 weights that LIL and NVIDIA now publish as default.
 
 ## 4. Performance
 
@@ -215,7 +218,7 @@ All runs below use the `llm-inference-bench` harness (`llm_decode_bench.py` 0.8.
 
 ### 4.1 R1: 4 RTX PRO 6000 Server Edition, fork, QAD, TP4 + DCP4 + MTP3
 
-Host: Nebius `gpu-rtx6000-a` 8-GPU VM, on demand at US$ 14.40/h, GPUs 0 to 3, NRD disk of 1,767 GiB, command printed by the image (`print-command-glm53-tp4-dcp4-mtp3.sh`) with `NCCL_NET_PLUGIN=none` and `HF_HUB_OFFLINE=1`. Date 2026-11-05. Driver P2P override **not** active. Results in `f3/resultados/rtx-20261105/`. Observed (§12.2).
+Host: Nebius `gpu-rtx6000-a` 8-GPU VM, on demand at US$ 14.40/h, GPUs 0 to 3, NRD disk of 1,767 GiB, command printed by the image (`print-command-glm53-tp4-dcp4-mtp3.sh`) with `NCCL_NET_PLUGIN=none` and `HF_HUB_OFFLINE=1`. Date 2026-11-05. Driver P2P override **not** active. Results in the results archive: `f3/resultados/rtx-20261105/`. Observed (§12.2).
 
 | Item | Value |
 |---|---|
@@ -297,7 +300,7 @@ Fork: `local-inference-lab` vLLM, image `karmic-kraken-20261016`, vLLM commit `8
 
 | Feature | In upstream vLLM 0.32.0? | Notes | Evidence |
 |---|---|---|---|
-| B12X kernels: attention, MoE, dense, KDA, PCIe all-reduce | No | The likely source of SM120 speed. Need the fork image. The `local-inference-lab/b12x` repository is archived and moved into FlashInfer (§22.1) | Observed absence in upstream (§10.3) |
+| B12X kernels: attention, MoE, dense, KDA, PCIe all-reduce | No | The likely source of SM120 speed. Need the fork image. The `local-inference-lab/b12x` repository is archived and moved into FlashInfer (§22.1) | Observed absence in upstream in §10.3. Update of 2026-11-12: upstream vLLM `main` now has a b12x attention backend (`vllm/v1/attention/backends/b12x.py`) and `--prefill-schedule-interval`; `--prefill-compute-share` and `--max-parallel-prefills` are still fork-only (Observed in the upstream source). Whether upstream covers our MoE, KDA and all-reduce paths is Unknown |
 | `--prefill-compute-share`, `--max-parallel-prefills`, `--prefill-schedule-interval` | No (0 hits in `vllm/config/scheduler.py` of v0.32.0) | Reserves a share of compute for prefill when decode is active, with one prefill lane. Measured effect in R1: prefill at 40% under decode, decode protected | Observed (§10.3, §12.2) |
 | LMCache fork with its own DCP | Separate process | LMCache `0.5.3.dev453+lil...g8ef537d6481b` (2026-10-11). Implements DCP itself (`dcp_size`, per-rank fragments, `_get_dcp_rank`). History diverges from upstream LMCache: only PR #4679 is an ancestor; #4834, #4936, #5042, #5076 and #5307 are not. Has `BlockStored` but no `BlockRemoved` event | Observed, extracted from image (§25.1) |
 | KDA path | Different file | On CUDA the fork loads `vllm/models/glm5next/nvidia/kda.py` (Kimi-K3 base, B12X, `B12XKDARecoverSSMCommitContext`), which does not exist in v0.33.0. FlashKDA built with an SM120 patch; R1 ran with `"kda_prefill_backend":"b12x"` | Observed (§26.5) |
@@ -306,7 +309,7 @@ Fork: `local-inference-lab` vLLM, image `karmic-kraken-20261016`, vLLM commit `8
 
 Features we use that upstream also has: MTP, DCP, `--max-num-batched-tokens`, `--load-format instanttensor` and `ipc_cache` (Observed, §10.3). Use `num_speculative_tokens` 3: the wiki reports `illegal memory access` under high concurrency above 3 (Reported, §10.1). Upstream 0.32.0 names the autotune flag `--no-enable-flashinfer-autotune`; the vLLM recipe's `--disable-flashinfer-autotune` was rejected (Observed, §9.3 correction, §10.1).
 
-Fork switches not yet explored (from `.lil/changes/`, §23.3): `VLLM_B12X_BF16_GEMV=1` (#873, decode), `VLLM_SCHEDULER_UNCAP_PREFILL_ONLY_STEPS=1` (#880, prefill), `VLLM_GLM53_KDA_MXFP8_ACTIVATION_MODE=a16` (KDA MXFP8 with BF16 activation; Reported long-context quality 79.6% against 76.5% at 516K), and a prefill work limit under decode (#862, parameter name Unknown).
+Fork switches not yet explored (from `.lil/changes/`, §23.3): `VLLM_B12X_BF16_GEMV=1` (#873, decode), `VLLM_SCHEDULER_UNCAP_PREFILL_ONLY_STEPS=1` (#880, prefill), `VLLM_GLM53_KDA_MXFP8_ACTIVATION_MODE=a16` (KDA MXFP8 with BF16 activation; Reported long-context quality 79.6% against 76.5% at 516K, measured on the QAD2 weights `qad2-kda-w8a16`, not on ours), and a prefill work limit under decode (#862, parameter name Unknown).
 
 ## 6. Maintenance risk
 
@@ -316,12 +319,12 @@ Fork switches not yet explored (from `.lil/changes/`, §23.3): `VLLM_B12X_BF16_G
 | Maintainers | Volunteer community; 316 open issues on the vLLM fork, 128 on B12X | Observed (§13.3) |
 | Hardware lock-in | B12X kernels target SM120; moving to another GPU loses the gain. Fork binaries list arch 10.0 in `CUDA_ARCH_LIST`, but the fork was never tested on a B300 | Observed (§13.3, §13.2) |
 | Rebuild | `blackwell-llm-docker` has dozens of long Dockerfiles (CUDA 13.3 and 13.4, FlashInfer wheels) and documents build OOMs; no licence declared | Observed (§13.3) |
-| Licences | vLLM fork, LMCache, FlashInfer, InstantTensor, `lil`: Apache-2.0. `nccl-canonical`: "other". `rtx6kpro`, `llm-inference-bench`, `blackwell-llm-docker`: none declared. QAD checkpoint: "other" | Observed (§13.3, §22.1) |
+| Licences | vLLM fork, LMCache, FlashInfer, InstantTensor, `lil`: Apache-2.0. `nccl-canonical`: "other". `rtx6kpro`, `llm-inference-bench`, `blackwell-llm-docker`: none declared. QAD checkpoint: Local Inference Lab License 1.0 (no reupload, attribution notice on the service page); the same bytes under the NVIDIA Open Model Agreement at `nvidia/GLM-5.3-Flash-FP4-Local@f83de1b016` | Observed (§13.3, §22.1; licences read 2026-11-17) |
 | Speed below reports | Decode C1 about half of the wiki on Nebius (cause Unknown) | Observed (§12.2) |
 | Porting upstream features | Porting FlashState would mean redoing about 5 thousand lines in the scheduler and cache manager, the files where the fork diverges most; estimate of weeks is a Hypothesis | Observed diff sizes, Hypothesis on effort (§26.5) |
 | LMCache events | The image's LMCache predates upstream PR #5307 (`BlockRemoved` for the CPU tier); whether it works with GLM-5.3-Flash recurrent checkpoints and DCP is a Hypothesis | Inferred and Reported (§25.1) |
 
-Conditions set for using the fork (§13.3): pin the image by digest, the vLLM commit (`8244d1c443`) and the checkpoint revision (`dec48abd…`) and mirror the image in our own registry, never the moving tag `karmic-kraken-beta`; rebuild the image once from its source lock on a CPU VM; run the harness matrix and `needle-checksum` on every change of image, checkpoint or flag; clarify the image repository and QAD checkpoint licences before production.
+Conditions set for using the fork (§13.3): pin the image by digest, the vLLM commit (`8244d1c443`) and the checkpoint revision (`f83de1b016`, identical files to the measured `dec48abd…`) and mirror the image in our own registry, never the moving tag `karmic-kraken-beta`; rebuild the image once from its source lock on a CPU VM; run the harness matrix and `needle-checksum` on every change of image, checkpoint or flag; clarify the image repository and QAD checkpoint licences before production.
 
 Every fork update is a rebase plus requalification through the quality gate (§22.1, §22.3).
 
@@ -332,7 +335,7 @@ Every fork update is a rebase plus requalification through the quality gate (§2
 3. **Decode all-reduce message size.** §23.1 says 8 to 64 KiB, §25.2 says 8 to 56 KiB, §28.2 says 256 B to 2 KiB. Which is right decides which `p2pmark` row predicts decode.
 4. **DCP1 or DCP4.** DCP1 decoded faster and passed 24 agents in one run; DCP4 holds 3.4x more KV. The second DCP1 speed run and the LMCache test with 24 active agents are pending (§29.9).
 5. **Second server start time.** With the B12X JIT cache persisted, is a restart below 5 minutes (§13.4 P3)? Not measured on Nebius; 201 s with warm cache on Vast.
-6. **QAD checkpoint licence ("other")** and the licences of `blackwell-llm-docker`, `rtx6kpro` and `llm-inference-bench`.
+6. **Legal review of the weights licence.** Both licences were read on 2026-11-17 (§3.4). Open: the indemnity clause of the NVIDIA Open Model Agreement and which licence binds bytes published by both LIL and NVIDIA. The licences of `blackwell-llm-docker`, `rtx6kpro` and `llm-inference-bench` are still undeclared.
 7. **KV per token on the fork.** Measured on B300 upstream (8.7 KB) and reported by the wiki (8.3 KB). R1 logs give 23.2 million tokens; the per-token figure on our fork was not computed in the sources. Session size in the sources varies between 2.2, 2.28 and 2.3 GB for 256K.
 8. **Image rebuild from source.** Not yet done; until then the image is a black box (§13.3 condition 2).
-9. **Long-context quality.** No quality test beyond the 8K needle and `gsm8k` ran on our stack. AA-LCR and the 516K numbers are Reported only.
+9. **Long-context and agent-task quality.** No quality test beyond the 8K needle and `gsm8k` ran on our stack. AA-LCR and the 516K numbers are Reported only and come from other checkpoints (§3.2). Phase 2 of the AWS plan compares our weights with the FP8 original.

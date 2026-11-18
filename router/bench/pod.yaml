@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: bench
+  labels: {app: bench, project: infer-validation}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: bench
+      image: python:3.12-slim
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -e
+          pip install -q "inference-perf==0.7.0" 2>&1 | tail -1
+          mkdir -p /workspace && cd /workspace
+          inference-perf --config_file /cfg/inference-perf.yaml > /workspace/stdout.log 2>&1 || echo "rc=$?" >> /workspace/stdout.log
+          touch /workspace/DONE
+          sleep 1200
+      volumeMounts:
+        - {name: cfg, mountPath: /cfg}
+        - {name: ws, mountPath: /workspace}
+  volumes:
+    - name: cfg
+      configMap: {name: bench-cfg}
+    - name: ws
+      emptyDir: {}

@@ -1,0 +1,106 @@
+# ILLUSTRATIVE, NOT MEASURED, NEVER DEPLOYED.
+#
+# A KEDA ScaledObject for one cell of GLM-5.3-Flash replicas (one replica = 4 GPUs = one
+# g7e.24xlarge), for phase 5 of docs/06 if the cell runs on EKS. Shape copied from the llm-d
+# v1.0.0 guides (Reported):
+#   guides/workload-autoscaling/keda-epp/optimized-baseline/overlays/k8s/inflight/scaledobject.yaml
+#   guides/workload-autoscaling/keda-epp-token-aware/optimized-baseline/base/scaledobject.yaml
+# Metric names: llm_d_epp_inflight_requests and llm_d_epp_inflight_tokens are Reported in the
+# llm-d v1.0.0 router metrics reference; vllm:kv_cache_usage_perc is Observed on upstream vLLM
+# 0.32.0 and present on the fork through the harness (one of two candidate names, see
+# references/vllm-metrics.md). Every threshold below is a Hypothesis; see
+# references/signals-and-thresholds.md for the reasoning and the test that validates it.
+#
+# Placeholders to replace before use:
+#   llm-d-glm53         namespace of the cell
+#   glm53-decode        Deployment (or LeaderWorkerSet) of the replicas
+#   prometheus address  your Prometheus
+#   4100                V_P, peak prefill throughput under decode in tok/s. 4,100 is the R1
+#                       DCP4 value (Observed, ARQUITETURA.md §12.2). Recalibrate with
+#                       guides/recipes/router/calibration/calibrate.sh, CHUNK_SIZE=4096.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: glm53-cell-a
+  namespace: llm-d-glm53
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: glm53-decode
+  # Floor and ceiling. The floor is the off-peak minimum of the cell (2 replicas: one working,
+  # one N+1; ARQUITETURA.md §17.3 requires N+1 per cell). The scheduled peak floor comes from the
+  # cron trigger below.
+  minReplicaCount: 2
+  maxReplicaCount: 8
+  triggers:
+    # Scheduled floor: reach the peak floor 20 min before the working day starts (§18.3, §20.1:
+    # 15 to 20 min before the peak). desiredReplicas is the planned peak floor; compute it with
+    # examples/capacity-planning-worked.md. With a 21 to 23 min cold start the instances must be
+    # requested earlier still, so start the window at least one lead time before it is needed.
+    # KEDA cron scaler (Reported, https://keda.sh/docs/2.20/scalers/cron/, read 2026-11-12): the
+    # HPA takes the highest result across triggers, so inside the window desiredReplicas acts as
+    # a dynamic floor and the reactive triggers can only add to it.
+    - type: cron
+      metadata:
+        timezone: America/Sao_Paulo
+        start: 15 7 * * 1-5
+        end: 0 19 * * 1-5
+        desiredReplicas: "6"
+    # Reactive, primary: in-flight requests per replica. 18 = 0.75 x C, with C = 24 agent
+    # sessions inside the SLO for DCP1 (one run, Observed). Replace C by the lower of the two
+    # phase 2 runs of the chosen profile.
+    - type: prometheus
+      name: inflight-requests
+      metricType: AverageValue
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc.cluster.local:9090
+        query: >-
+          sum(llm_d_epp_inflight_requests{namespace="llm-d-glm53",producer_name="inflight-load-producer"})
+          or vector(0)
+        threshold: "18"
+    # Reactive, secondary: seconds of uncached prefill backlog per replica. 4 s is about
+    # TTFT_SLO - P/V_P = 5 - 3700/4100 (Inferred). sum(), not avg(), so the value grows with
+    # the pool (llm-d token-aware guide).
+    - type: prometheus
+      name: prefill-backlog-seconds
+      metricType: AverageValue
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc.cluster.local:9090
+        query: >-
+          (sum(llm_d_epp_inflight_tokens{namespace="llm-d-glm53",producer_name="inflight-load-producer"}) / 4100)
+          or vector(0)
+        threshold: "4"
+    # Ceiling guard: pods' worth of KV in use. 0.9 sits above the 0.73 maximum measured inside
+    # the SLO with DCP1. With DCP4 KV never passed 0.28 in our runs, so this trigger would never
+    # fire there; that is expected.
+    - type: prometheus
+      name: kv-usage
+      metricType: AverageValue
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc.cluster.local:9090
+        query: >-
+          sum(vllm:kv_cache_usage_perc{namespace="llm-d-glm53"}) or vector(0)
+        threshold: "0.9"
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        # Add at most one replica per 10 min: a replica takes 8 to 23 min to serve, and a burst
+        # of sub-agents drains in seconds (references/signals-and-thresholds.md). The llm-d
+        # token-aware guide uses one pod per 180 s for a ~4 min cold start.
+        scaleUp:
+          stabilizationWindowSeconds: 120
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 600
+        # Remove at most one replica per 30 min, after 30 min below target. Scale-in discards
+        # the replica's HBM KV; the drain itself (remove from the pool, wait for running == 0,
+        # SIGTERM with a shutdown timeout) is done by the pod's preStop hook and grace period,
+        # not by KEDA.
+        scaleDown:
+          stabilizationWindowSeconds: 1800
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 1800

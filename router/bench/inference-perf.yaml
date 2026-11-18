@@ -1,0 +1,40 @@
+# A/B load. Open loop (constant), shared prefix LARGER than one glm5next KV block (8704 tokens),
+# otherwise the vLLM prefix cache never hits. 17,500 tokens = 2 blocks (17,408 reusable).
+load:
+  type: constant
+  base_seed: 12345
+  num_workers: 2
+  request_timeout: 300
+  stages:
+    - rate: 3
+      duration: 80          # 240 requests = 60 groups x 4 questions
+api:
+  type: completion
+  streaming: true
+server:
+  type: vllm
+  model_name: mini
+  base_url: http://optimized-baseline-epp:80
+  ignore_eos: true
+tokenizer:
+  pretrained_model_name_or_path: zai-org/GLM-5.3-Flash
+data:
+  type: shared_prefix
+  shared_prefix:
+    num_groups: 60
+    num_prompts_per_group: 4
+    system_prompt_len: 17500
+    question_len: 512
+    output_len: 128
+report:
+  request_lifecycle:
+    summary: true
+    per_stage: true
+    per_request: true
+  goodput:
+    constraints:
+      ttft: 2.0      # PROVISIONAL: the project SLO was not defined yet
+      tpot: 0.05
+storage:
+  local_storage:
+    path: /workspace

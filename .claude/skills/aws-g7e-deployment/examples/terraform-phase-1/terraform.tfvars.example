@@ -1,0 +1,12 @@
+# Illustrative. Copy to terraform.tfvars (git-ignored) and fill in. No account IDs here.
+region              = "us-east-1"
+availability_zone   = "us-east-1b"            # one of the zones listed on 2026-11-04; recheck
+ami_id              = "ami-REPLACE_ME"        # resolved from the DLAMI SSM parameter, pinned
+max_runtime_minutes = 240
+results_bucket      = "REPLACE_ME"
+results_prefix      = "infer/results/"
+owner               = "REPLACE_ME"
+run_id              = "2026-11-20-a"
+expires_at          = "2026-11-20T23:00:00Z"
+budget_limit_usd    = "200"
+budget_emails       = ["REPLACE_ME@example.com"]

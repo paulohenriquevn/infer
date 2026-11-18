@@ -1,0 +1,36 @@
+## Tweaks of the glm5next mini model over the optimized-baseline guide (llm-d v1.0.0).
+## Last layer, after base.values.yaml and optimized-baseline.values.yaml.
+## blockSizeTokens: the glm5next vLLM uses an attention block of 8704 tokens (vLLM metric "cache_config_info");
+## with the plugin default, the EPP hashes do not match the real cache.
+router:
+  epp:
+    resources:
+      requests:
+        cpu: "2"
+        memory: 4Gi
+      limits:
+        memory: 8Gi
+    pluginsCustomConfig:
+      optimized-baseline-plugins.yaml: |
+        apiVersion: llm-d.ai/v1
+        kind: EndpointPickerConfig
+        plugins:
+        - type: approx-prefix-cache-producer
+          parameters:
+            blockSizeTokens: 8704
+            maxPrefixTokensToMatch: 262144
+        - type: inflight-load-producer
+        - type: prefix-cache-affinity-filter
+        - type: token-load-scorer
+        schedulingProfiles:
+        - name: default
+          plugins:
+          - pluginRef: prefix-cache-affinity-filter
+          - pluginRef: token-load-scorer
+  proxy:
+    resources:
+      requests:
+        cpu: "2"
+        memory: 2Gi
+      limits:
+        memory: 8Gi

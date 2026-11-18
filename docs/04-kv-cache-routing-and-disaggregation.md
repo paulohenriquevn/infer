@@ -150,12 +150,12 @@ Limits of the PR: it covers only L1, does not publish while the engine is idle, 
 
 ## 3. LMCache under HBM pressure: the §29.8 experiment
 
-Real model, fork image, 4 RTX PRO 6000 on Vast.ai, 2026-11-12. All Observed. Results in `f3/resultados/vast-20261111/vllm/vast-vllm-lmcache*`.
+Real model, fork image, 4 RTX PRO 6000 on Vast.ai, 2026-11-12. All Observed. Results in the results archive: `f3/resultados/vast-20261111/vllm/vast-vllm-lmcache*`.
 
 Two arms of the harness:
 
-- `vllm/lmcache`: the server started by the image's own launcher (`f3/sglang/servidor-vllm-lmcache-direto.sh`) with our vLLM profile and `LMCacheRecurrentCheckpointConnector`. L1 of 200 GB in `/dev/shm`.
-- `vllm/lmcache-controle`: same server, cache in HBM only.
+- `vllm/lmcache`: the server started by the image's own launcher (`bench/server-vllm-lmcache-direct.sh`) with our vLLM profile and `LMCacheRecurrentCheckpointConnector`. L1 of 200 GB in `/dev/shm`.
+- `vllm/lmcache-control`: same server, cache in HBM only.
 
 Both ran DCP4, with KV limited to 5 GiB per GPU (about 2.5 million tokens), and 48 agents with 20 to 60 s of think time between turns.
 
@@ -172,7 +172,7 @@ Findings:
 - The mechanism works. The log shows 62 recurrent-state restores started and 1 that failed and was recomputed.
 - LMCache does not raise concurrent capacity. 90 restores waited for GPU space, and 9 gave up after 133 to 185 s and recomputed the prompt. Restored KV has to fit in HBM again.
 - Design flaw: the test assumed think time would keep about 23 agents active (Inferred). With turns queued for minutes, queue time became activity, all 48 sessions competed for HBM, and both arms collapsed. The run measures overload behaviour, not the TTFT of a restore in steady state.
-- The control arm has no complete `agentes-48.json`, because the bench writes only finished scenarios and the run was interrupted (§29.8, §29.9 item 3).
+- The control arm has no complete `agentes-48.json` (the file name the harness used then), because the bench writes only finished scenarios and the run was interrupted (§29.8, §29.9 item 3).
 
 Design consequence (Inferred, §29.8): capacity per replica is HBM divided by the context of active sessions. With DCP1, 6.8 million tokens hold about 60 active sessions of 100K tokens, more than the 24 that the SLO computation allows.
 
@@ -223,13 +223,13 @@ Not proven: behaviour under memory pressure, with more than 2 replicas, or with 
 2. Saturation threshold. τ = `peakPrefillThroughput` × `maxTTFTPenaltyMs`, calibrated per model and GPU (Reported, "Sticky Until Saturated" blog). We use the guide's default, calibrated for another model and GPU. Copying it from other hardware gives a 1.3x to 1.9x error (Reported, same blog, KV report). Calibration with `calibrate.sh` on TP4 is test E10 (§17.6).
 3. Burst against slots. A burst of 51 sub-agents exceeds the 32 slots of one replica (`max_num_seqs` 32); pure affinity would queue about 19 requests (Inferred, §17.3 and KV report). §17.4 asks for single-flight: one fetch or one prefill per uncached prefix, the rest wait for it. No project read documents request coalescing, so this is our own design (KV report).
 4. Precise KV-event routing (`precise-prefix-cache-routing`) is not tested (§4, §7.4). It consumes vLLM events over ZMQ. Upstream says hybrid-attention-aware scoring is work in progress, and the only open PR (llm-d-router #3875) indexes sliding-window groups, not KDA (Reported, KV report). The indexer may overestimate hits when the KDA checkpoint for that point was evicted (Hypothesis). With the image's LMCache lacking `BlockRemoved`, §25.1 recommends a fixed `lruCapacityPerServer` and not depending on LMCache events (Inferred).
-5. Running outside Kubernetes. The llm-d EPP can run outside Kubernetes as a standalone EPP with Envoy and file-based endpoint discovery (Reported, LMCache PR #5307 validation). Our experiments ran the EPP in standalone mode inside a cluster (§7); we have not run it outside Kubernetes.
+5. Running outside Kubernetes. The llm-d EPP can run outside Kubernetes as a standalone EPP with Envoy and file-based endpoint discovery. Sources: the llm-d `v1.0.0` guide `guides/no-kubernetes-deployment` documents the setup; LMCache PR #5307 only reports that its validation used an unmodified EPP, Envoy `v1.33.2` and file discovery, with no configuration (Reported, both read on 2026-11-12). Our experiments ran the EPP in standalone mode inside a cluster (§7); we have not run it outside Kubernetes.
 
 ## 5. Prefill/decode disaggregation
 
 ### 5.1 What we tested on the mini (§9.2)
 
-Same 2 RTX GPUs and same load: 1 prefill + 1 decode replica with NIXL over TCP (`f3/llmd/pd/pd.yaml`, vLLM reference proxy) against 2 aggregated replicas. Cold unique prompts of 17,408 tokens, output 128, closed loop, warm-up discarded. Data in `f3/resultados/pd-20261105/`. All Observed on the mini.
+Same 2 RTX GPUs and same load: 1 prefill + 1 decode replica with NIXL over TCP (`router/pd/pd.yaml`, vLLM reference proxy) against 2 aggregated replicas. Cold unique prompts of 17,408 tokens, output 128, closed loop, warm-up discarded. Data in `f3/resultados/pd-20261105/`. All Observed on the mini.
 
 - P/D works on the hybrid KDA + MLA mini. The decode side computed 1 token and received 17,707 (and 40,299) tokens via `external_kv_transfer`. Logprobs of P/D and aggregated differed by at most 0.0235, the same order as aggregated with and without prefix cache (up to 0.0234), so there is no sign of error in KDA state transfer.
 - Recipe gaps on SM120: `VLLM_KV_CACHE_LAYOUT=HND` failed (`valid layouts: ['BLHNC']`); UCX tried the RDMA device `mlx5_0` and failed; `UCX_NET_DEVICES=eth0` with `UCX_TLS=tcp,cuda_copy` worked.

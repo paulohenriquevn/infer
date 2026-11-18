@@ -1,0 +1,151 @@
+# 1P1D P/D of the mini model with NIXL (TCP), following the vLLM recipe for GLM-5.3-Flash. Without the llm-d.ai/guide label, the EPP does not see them.
+# The make-mini ConfigMap must hold make_mini.py (see vllm-mini-pool.yaml); it is not in this repository.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-prefill
+  labels: {app: vllm-pd, role: prefill, project: infer-validation}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: vllm-pd, role: prefill}
+  template:
+    metadata:
+      labels: {app: vllm-pd, role: prefill}
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.32.0
+          command: ["bash", "-ec"]
+          args:
+            - |
+              mkdir -p /work/ref && cd /work
+              REV=46a050bec13002ad29ee795c16e61cf4fa3c4a9c
+              BASE=https://huggingface.co/zai-org/GLM-5.3-Flash/resolve/$REV
+              curl -sfL $BASE/config.json -o ref/config.json
+              cp /scripts/make_mini.py .
+              python3 make_mini.py --out mini
+              for f in tokenizer.json tokenizer_config.json chat_template.jinja generation_config.json processor_config.json LICENSE; do
+                curl -sfL $BASE/$f -o mini/$f
+              done
+              vllm download-kernels || true
+              exec vllm serve mini --served-model-name mini --host 0.0.0.0 --port 8000 \
+                --max-model-len 262144 --dtype bfloat16 --kv-cache-dtype fp8_ds_mla \
+                --gpu-memory-utilization 0.5 --no-disable-hybrid-kv-cache-manager \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_producer"}' --enforce-eager
+          env:
+            - {name: VLLM_SSM_CONV_STATE_LAYOUT, value: "DS"}
+            - {name: UCX_NET_DEVICES, value: "eth0"}
+            - {name: UCX_TLS, value: "tcp,cuda_copy"}
+            - {name: VLLM_NIXL_SIDE_CHANNEL_PORT, value: "5557"}
+            - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+          ports:
+            - {containerPort: 8000, name: http}
+            - {containerPort: 5557, name: nixl}
+          resources:
+            limits: {nvidia.com/gpu: 1}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+            - {name: work, mountPath: /work}
+            - {name: shm, mountPath: /dev/shm}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 90
+      volumes:
+        - name: scripts
+          configMap: {name: make-mini}
+        - name: work
+          emptyDir: {}
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 16Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pd-prefill
+spec:
+  selector: {app: vllm-pd, role: prefill}
+  ports:
+    - {name: http, port: 8000, targetPort: 8000}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pd-decode
+  labels: {app: vllm-pd, role: decode, project: infer-validation}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: vllm-pd, role: decode}
+  template:
+    metadata:
+      labels: {app: vllm-pd, role: decode}
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.32.0
+          command: ["bash", "-ec"]
+          args:
+            - |
+              mkdir -p /work/ref && cd /work
+              REV=46a050bec13002ad29ee795c16e61cf4fa3c4a9c
+              BASE=https://huggingface.co/zai-org/GLM-5.3-Flash/resolve/$REV
+              curl -sfL $BASE/config.json -o ref/config.json
+              cp /scripts/make_mini.py .
+              python3 make_mini.py --out mini
+              for f in tokenizer.json tokenizer_config.json chat_template.jinja generation_config.json processor_config.json LICENSE; do
+                curl -sfL $BASE/$f -o mini/$f
+              done
+              vllm download-kernels || true
+              exec vllm serve mini --served-model-name mini --host 0.0.0.0 --port 8000 \
+                --max-model-len 262144 --dtype bfloat16 --kv-cache-dtype fp8_ds_mla \
+                --gpu-memory-utilization 0.5 --no-disable-hybrid-kv-cache-manager \
+                --kv-transfer-config '{"kv_connector":"NixlConnector","kv_role":"kv_consumer"}' 
+          env:
+            - {name: VLLM_SSM_CONV_STATE_LAYOUT, value: "DS"}
+            - {name: UCX_NET_DEVICES, value: "eth0"}
+            - {name: UCX_TLS, value: "tcp,cuda_copy"}
+            - {name: VLLM_NIXL_SIDE_CHANNEL_PORT, value: "5557"}
+            - name: VLLM_NIXL_SIDE_CHANNEL_HOST
+              valueFrom: {fieldRef: {fieldPath: status.podIP}}
+          ports:
+            - {containerPort: 8000, name: http}
+            - {containerPort: 5557, name: nixl}
+          resources:
+            limits: {nvidia.com/gpu: 1}
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+            - {name: work, mountPath: /work}
+            - {name: shm, mountPath: /dev/shm}
+          readinessProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 3
+          startupProbe:
+            httpGet: {path: /health, port: 8000}
+            periodSeconds: 10
+            failureThreshold: 90
+      volumes:
+        - name: scripts
+          configMap: {name: make-mini}
+        - name: work
+          emptyDir: {}
+        - name: shm
+          emptyDir: {medium: Memory, sizeLimit: 16Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pd-decode
+spec:
+  selector: {app: vllm-pd, role: decode}
+  ports:
+    - {name: http, port: 8000, targetPort: 8000}
